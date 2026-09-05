@@ -1,3 +1,3 @@
-"""Noise Visualizer — WAV to audio-reactive short clips."""
+"""NOISE/VIZ — audio-reactive visualizer clips."""
 
 __version__ = "1.0.0"

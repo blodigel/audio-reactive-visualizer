@@ -36,7 +36,7 @@ Or pull the GHCR image (after the first successful Actions run):
 
 ```bash
 docker run --rm -p 8080:8080 -v noise-viz-data:/data \
-  ghcr.io/blodigel/noise-visualizer:latest
+  ghcr.io/blodigel/audio-reactive-visualizer:latest
 ```
 
 If the package is private, `docker login ghcr.io` with a GitHub token that has `read:packages`.
@@ -45,11 +45,11 @@ If the package is private, `docker login ghcr.io` with a GitHub token that has `
 
 Push to `main` (or run the workflow manually). GitHub Actions builds **linux/amd64 + linux/arm64** and pushes:
 
-- `ghcr.io/blodigel/noise-visualizer:latest`
-- `ghcr.io/blodigel/noise-visualizer:<sha>`
-- `ghcr.io/blodigel/noise-visualizer:main`
+- `ghcr.io/blodigel/audio-reactive-visualizer:latest`
+- `ghcr.io/blodigel/audio-reactive-visualizer:<sha>`
+- `ghcr.io/blodigel/audio-reactive-visualizer:main`
 
-After the first push, GitHub may keep the package private. To make it public: **Packages → noise-visualizer → Package settings → Change visibility → Public**.
+After the first push, GitHub may keep the package private. To make it public: **Packages → audio-reactive-visualizer → Package settings → Change visibility → Public**.
 
 ## Develop without Docker
 

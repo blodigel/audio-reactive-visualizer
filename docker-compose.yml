@@ -1,7 +1,7 @@
 services:
   app:
     build: .
-    image: ghcr.io/blodigel/noise-visualizer:local
+    image: ghcr.io/blodigel/audio-reactive-visualizer:local
     ports:
       - "8080:8080"
     volumes:

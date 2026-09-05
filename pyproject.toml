@@ -1,5 +1,5 @@
 [project]
-name = "noise-visualizer"
+name = "audio-reactive-visualizer"
 version = "1.0.0"
 description = "WAV → Instagram-friendly audio-reactive visualizer clips. Built for noise and experimental music."
 readme = "README.md"

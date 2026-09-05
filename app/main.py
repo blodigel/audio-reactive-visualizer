@@ -50,11 +50,11 @@ def create_app() -> FastAPI:
     mimetypes.add_type("font/ttf", ".ttf")
     mimetypes.add_type("font/otf", ".otf")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    app = FastAPI(title="Noise Visualizer", version="1.0.0")
+    app = FastAPI(title="NOISE/VIZ", version="1.0.0")
 
     @app.get("/api/health")
     def health() -> dict:
-        return {"ok": True, "service": "noise-visualizer"}
+        return {"ok": True, "service": "audio-reactive-visualizer"}
 
     @app.get("/api/presets")
     def presets() -> dict:
