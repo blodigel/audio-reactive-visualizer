@@ -4,6 +4,8 @@ WAV → short, audio-reactive visualizer clips. Built for **noise / industrial /
 
 Runs locally in Docker. Nothing is uploaded to a third party.
 
+![Landing](docs/screenshot-landing.png)
+
 ![Editor](docs/screenshot-app.png)
 
 ![Noise look](docs/look-noise.png)
@@ -14,7 +16,7 @@ Runs locally in Docker. Nothing is uploaded to a third party.
 2. See the waveform, onsets, and **suggested cut points**.
 3. Drag, resize, add or remove the bits of the track you want (8–30s, Instagram-friendly). **Each clip has its own look** — select a clip, then change effect, colors, text or background. Add another clip and style it differently.
 4. Pick **background, effect and text colors** (or a palette swatch). Optionally **import a background image** (AI still, photo, PNG/JPEG/WebP) and set **BG tint** (how hard the background color washes over it). Then ride **grain, jitter, glitch, bloom, scanlines, chroma, trail, reactivity**.
-5. Add **title / subtext** on the frame.
+5. Add **title / subtext** on the frame. Pick a **font** (Archivo, Bebas, metal, glitch, …) or **upload a TTF/OTF**. Optionally **upload a logo** (PNG with transparency) and place it above the text or in a corner.
 6. Live preview in the browser (reacts to the audio).
 7. **Render** H.264 + AAC MP4s sized for Reels / Shorts, square, 4:5, or landscape.
 

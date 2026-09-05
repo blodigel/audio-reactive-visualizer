@@ -298,6 +298,12 @@ button { cursor: pointer; }
   white-space: nowrap;
   max-width: 180px;
 }
+.fonts button {
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  padding: 5px 8px;
+}
 
 .sliders {
   display: grid;

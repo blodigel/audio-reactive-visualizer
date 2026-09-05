@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.fonts import public_fonts
 from app.models import FormatId, SceneId, VisualSettings
 
 FORMATS: dict[FormatId, dict[str, Any]] = {
@@ -169,10 +170,19 @@ def public_catalog() -> dict[str, Any]:
             {"key": "trail", "label": "Trail", "blurb": "Phosphor persistence"},
             {"key": "reactivity", "label": "Reactivity", "blurb": "How tightly it follows the audio"},
         ],
+        "fonts": public_fonts(),
+        "logo_positions": [
+            {"id": "above-text", "label": "Above text"},
+            {"id": "top-left", "label": "Top left"},
+            {"id": "top-right", "label": "Top right"},
+            {"id": "lower-left", "label": "Lower left"},
+            {"id": "lower-right", "label": "Lower right"},
+        ],
         "defaults": {
             "bg_color": COLOR_PRESETS[0]["bg_color"],
             "effect_color": COLOR_PRESETS[0]["effect_color"],
             "text_color": COLOR_PRESETS[0]["text_color"],
             "scene": "mixed",
+            "font": "archivo",
         },
     }

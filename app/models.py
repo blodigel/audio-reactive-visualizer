@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.fonts import FONT_IDS
+
 SceneId = Literal[
     "auto",
     "oscilloscope",
@@ -23,6 +25,7 @@ SceneId = Literal[
 FormatId = Literal["reels", "square", "portrait", "landscape"]
 QualityId = Literal["draft", "standard", "high"]
 TextPosition = Literal["top", "center", "lower"]
+LogoPosition = Literal["above-text", "top-left", "top-right", "lower-left", "lower-right"]
 
 
 _HEX = re.compile(r"^#?[0-9A-Fa-f]{6}$")
@@ -43,6 +46,12 @@ class VisualSettings(BaseModel):
     effect_color: str = "#d63d24"
     text_color: str = "#ede6dc"
     background_id: str = ""
+    font: str = "archivo"
+    font_id: str = ""
+    logo_id: str = ""
+    logo_position: LogoPosition = "above-text"
+    logo_size: float = Field(default=0.18, ge=0.06, le=0.55)
+    logo_opacity: float = Field(default=1.0, ge=0, le=1)
     bg_opacity: float = Field(default=0.22, ge=0, le=1)
     format: FormatId = "reels"
     quality: QualityId = "standard"
@@ -74,15 +83,23 @@ class VisualSettings(BaseModel):
     def colors(cls, v: str) -> str:
         return _hex_color(v)
 
-    @field_validator("background_id")
+    @field_validator("background_id", "font_id", "logo_id")
     @classmethod
-    def bg_id(cls, v: str) -> str:
+    def asset_id(cls, v: str) -> str:
         raw = v.strip()
         if not raw:
             return ""
         if not re.fullmatch(r"[a-fA-F0-9]{12,32}", raw):
-            raise ValueError("Invalid background id")
+            raise ValueError("Invalid asset id")
         return raw.lower()
+
+    @field_validator("font")
+    @classmethod
+    def font_ok(cls, v: str) -> str:
+        raw = v.strip().lower()
+        if raw in FONT_IDS or raw == "custom":
+            return raw
+        raise ValueError("Unknown font")
 
 
 class ClipIn(BaseModel):

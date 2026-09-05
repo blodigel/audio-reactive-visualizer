@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>NOISE/VIZ</title>
     <meta name="description" content="WAV → Instagram-friendly audio-reactive visualizer clips. Built for noise and experimental music." />
-    <link rel="stylesheet" href="/static/css/app.css?v=8" />
+    <link rel="stylesheet" href="/static/css/app.css?v=11" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect fill='%23090807' width='16' height='16'/><rect fill='%23d4523e' x='2' y='7' width='12' height='2'/></svg>" />
   </head>
   <body>
@@ -108,11 +108,35 @@
             <div class="ctrl-label">Text overlay</div>
             <input id="text" class="field" type="text" maxlength="80" placeholder="TITLE" />
             <input id="subtext" class="field" type="text" maxlength="80" placeholder="subtext / artist" />
+            <div class="ctrl-label">Font</div>
+            <div id="fonts" class="seg wrap fonts"></div>
+            <div class="bg-import">
+              <input id="font-file" type="file" accept=".ttf,.otf,font/ttf,font/otf" hidden />
+              <button type="button" id="font-import" class="btn btn-sm">Upload font</button>
+              <button type="button" id="font-clear" class="btn btn-sm" hidden>Use bundled</button>
+              <span id="font-name" class="bg-name"></span>
+            </div>
             <div class="ctrl-row">
               <div id="textpos" class="seg grow"></div>
               <label class="mini">
                 size
                 <input id="text-size" type="range" min="0.2" max="1.5" step="0.01" value="0.65" />
+              </label>
+            </div>
+          </div>
+          <div class="ctrl-block">
+            <div class="ctrl-label">Logo</div>
+            <div class="bg-import">
+              <input id="logo-file" type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" hidden />
+              <button type="button" id="logo-import" class="btn btn-sm">Upload logo</button>
+              <button type="button" id="logo-clear" class="btn btn-sm" hidden>Clear</button>
+              <span id="logo-name" class="bg-name"></span>
+            </div>
+            <div class="ctrl-row">
+              <div id="logopos" class="seg wrap grow"></div>
+              <label class="mini">
+                size
+                <input id="logo-size" type="range" min="0.06" max="0.55" step="0.01" value="0.18" />
               </label>
             </div>
           </div>
@@ -164,6 +188,6 @@
       </main>
     </div>
     <div id="toast" class="toast" hidden></div>
-    <script type="module" src="/static/js/app.js?v=8"></script>
+    <script type="module" src="/static/js/app.js?v=10"></script>
   </body>
 </html>

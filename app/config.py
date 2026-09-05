@@ -24,10 +24,20 @@ class AppConfig(BaseSettings):
     def backgrounds_dir(self) -> Path:
         return self.data_dir / "backgrounds"
 
+    @property
+    def fonts_dir(self) -> Path:
+        return self.data_dir / "fonts"
+
+    @property
+    def logos_dir(self) -> Path:
+        return self.data_dir / "logos"
+
     def ensure_dirs(self) -> None:
         self.tracks_dir.mkdir(parents=True, exist_ok=True)
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
         self.backgrounds_dir.mkdir(parents=True, exist_ok=True)
+        self.fonts_dir.mkdir(parents=True, exist_ok=True)
+        self.logos_dir.mkdir(parents=True, exist_ok=True)
 
 
 config = AppConfig()

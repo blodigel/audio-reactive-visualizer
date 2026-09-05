@@ -25,6 +25,9 @@ export class Preview {
     this.running = false;
     this._lookKey = "";
     this.bgImage = null;
+    this.logoImage = null;
+    this.catalog = null;
+    this._fontFam = "";
     this.grain = this._makeGrain();
     this.trail = document.createElement("canvas");
     this.tctx = this.trail.getContext("2d");
@@ -61,12 +64,63 @@ export class Preview {
     if (this.running) this.draw();
   }
 
+  setLogo(img) {
+    this.logoImage = img || null;
+    this._lookKey = "";
+    if (this.running) this.draw();
+  }
+
+  setCatalog(catalog) {
+    this.catalog = catalog || null;
+  }
+
+  _lookSignature(s) {
+    if (!s) return "";
+    return [
+      s.bg_color,
+      s.effect_color,
+      s.text_color,
+      s.scene,
+      s.background_id,
+      s.bg_opacity,
+      s.font,
+      s.font_id,
+      s.logo_id,
+      s.logo_position,
+      s.logo_size,
+      s.text,
+      s.subtext,
+      s.text_position,
+      s.text_size,
+    ].join("|");
+  }
+
+  _fontFamily(s) {
+    if (s?.font_id) return `nv-custom-${s.font_id}`;
+    const fonts = this.catalog?.fonts || [];
+    const hit = fonts.find((f) => f.id === (s?.font || "archivo"));
+    return hit?.family || "Archivo Black";
+  }
+
+  _tracking(s) {
+    if (s?.font_id) return 0.06;
+    const fonts = this.catalog?.fonts || [];
+    const hit = fonts.find((f) => f.id === (s?.font || "archivo"));
+    return hit?.tracking ?? 0.08;
+  }
+
   setSettings(s) {
     this.settings = s;
-    const key = `${s?.bg_color || ""}|${s?.effect_color || ""}|${s?.text_color || ""}|${s?.scene || ""}|${s?.background_id || ""}|${s?.bg_opacity ?? ""}`;
+    const key = this._lookSignature(s);
     if (key !== this._lookKey) {
       this._lookKey = key;
       this.tctx.clearRect(0, 0, this.trail.width || 0, this.trail.height || 0);
+    }
+    const fam = this._fontFamily(s);
+    if (fam !== this._fontFam) {
+      this._fontFam = fam;
+      const load = document.fonts?.load?.(`600 48px "${fam}"`);
+      if (load) load.then(() => { if (this.running) this.draw(); }).catch(() => {});
     }
     if (this.running) this.draw();
   }
@@ -163,7 +217,7 @@ export class Preview {
     const pal = paletteFromSettings(s);
     const b = this._bands();
     const trailAmt = s.trail ?? 0.4;
-    const lookKey = `${s.bg_color || ""}|${s.effect_color || ""}|${s.text_color || ""}|${s.scene || ""}|${s.background_id || ""}|${s.bg_opacity ?? ""}`;
+    const lookKey = this._lookSignature(s);
     const lookChanged = lookKey !== this._lookKey;
     if (lookChanged) {
       this._lookKey = lookKey;
@@ -269,6 +323,7 @@ export class Preview {
 
     this._chroma(ctx, w, h, s.chromatic ?? 0, b.high);
 
+    this._logo(ctx, w, h, s);
     this._text(ctx, w, h, pal);
 
     const jit = (s.jitter ?? 0.3) * (5 + b.bass * 12);
@@ -479,20 +534,56 @@ export class Preview {
   _text(ctx, w, h, pal) {
     const s = this.settings || {};
     if (!s.text && !s.subtext) return;
+    const fam = this._fontFamily(s);
+    const track = this._tracking(s);
     ctx.textAlign = "center";
     ctx.fillStyle = `rgba(${pal.accent[0]},${pal.accent[1]},${pal.accent[2]},${s.text_opacity ?? 0.9})`;
     const size = (s.text_size ?? 0.65) * w * 0.06;
-    ctx.font = `600 ${size}px ui-sans-serif, system-ui, sans-serif`;
-    ctx.letterSpacing = "0.14em";
+    ctx.font = `600 ${size}px "${fam}", sans-serif`;
+    ctx.letterSpacing = `${track}em`;
     let y = h * 0.72;
     if (s.text_position === "top") y = h * 0.12;
     if (s.text_position === "center") y = h * 0.5;
     if (s.text) ctx.fillText(s.text, w / 2, y);
     if (s.subtext) {
-      ctx.font = `400 ${size * 0.42}px ui-monospace, monospace`;
+      ctx.font = `400 ${size * 0.42}px "${fam}", sans-serif`;
       ctx.fillStyle = `rgba(${pal.accent[0]},${pal.accent[1]},${pal.accent[2]},0.7)`;
       ctx.fillText(s.subtext, w / 2, y + size * 0.7);
     }
+  }
+
+  _logo(ctx, w, h, s) {
+    const img = this.logoImage;
+    if (!img) return;
+    const iw = img.naturalWidth || img.width;
+    const ih = img.naturalHeight || img.height;
+    if (!iw || !ih) return;
+    let lw = Math.max(12, w * (s.logo_size ?? 0.18));
+    let lh = lw * (ih / iw);
+    if (lh > h * 0.42) {
+      lh = h * 0.42;
+      lw = lh * (iw / ih);
+    }
+    const pos = s.logo_position || "above-text";
+    const mx = w * 0.055;
+    const my = h * 0.045;
+    let x = mx;
+    let y = my;
+    if (pos === "top-right") x = w - lw - mx;
+    else if (pos === "lower-left") y = h - lh - my;
+    else if (pos === "lower-right") {
+      x = w - lw - mx;
+      y = h - lh - my;
+    } else if (pos === "above-text") {
+      x = (w - lw) / 2;
+      if (s.text_position === "top") y = Math.max(my, h * 0.08 - lh - h * 0.02);
+      else if (s.text_position === "center") y = Math.max(my, h * 0.4 - lh - h * 0.025);
+      else y = Math.max(my, h * 0.68 - lh - h * 0.025);
+    }
+    ctx.save();
+    ctx.globalAlpha = s.logo_opacity ?? 1;
+    ctx.drawImage(img, x, y, lw, lh);
+    ctx.restore();
   }
 }
 

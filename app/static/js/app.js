@@ -1,6 +1,6 @@
-import { api, uploadWav } from "./api.js";
-import { Preview } from "./preview.js";
-import { Waveform, formatTime } from "./waveform.js";
+import { api, uploadWav } from "./api.js?v=10";
+import { Preview } from "./preview.js?v=10";
+import { Waveform, formatTime } from "./waveform.js?v=10";
 
 const $ = (id) => document.getElementById(id);
 
@@ -13,6 +13,12 @@ const state = {
     effect_color: "#d63d24",
     text_color: "#ede6dc",
     background_id: "",
+    font: "archivo",
+    font_id: "",
+    logo_id: "",
+    logo_position: "above-text",
+    logo_size: 0.18,
+    logo_opacity: 1,
     bg_opacity: 0.22,
     format: "reels",
     quality: "standard",
@@ -38,6 +44,10 @@ const state = {
   poll: null,
   bgName: "",
   bgNames: {},
+  fontName: "",
+  fontNames: {},
+  logoName: "",
+  logoNames: {},
   activeClipId: null,
 };
 
@@ -109,12 +119,73 @@ function loadClipSettings(id) {
   if (!c.settings) c.settings = { ...state.settings };
   else Object.assign(state.settings, c.settings);
   state.bgName = state.bgNames[state.settings.background_id] || (state.settings.background_id ? "custom image" : "");
+  state.fontName = state.fontNames[state.settings.font_id] || (state.settings.font_id ? "custom font" : "");
+  state.logoName = state.logoNames[state.settings.logo_id] || (state.settings.logo_id ? "logo" : "");
   const idx = wave.clips.indexOf(c) + 1;
   if (label) {
     label.textContent = `Editing clip ${idx} · ${c.settings.scene || "mixed"}`;
   }
   loadPreviewBg(state.settings.background_id);
+  loadPreviewLogo(state.settings.logo_id);
+  if (state.settings.font_id) installCustomFont(state.settings.font_id, `/api/fonts/${state.settings.font_id}`);
   syncControls();
+}
+
+function installCatalogFonts(fonts) {
+  for (const f of fonts || []) {
+    const id = `ff-${f.id}`;
+    if (document.getElementById(id)) continue;
+    const el = document.createElement("style");
+    el.id = id;
+    el.textContent = `@font-face{font-family:"${f.family}";src:url("${f.url}?v=10") format("truetype");font-display:swap;}`;
+    document.head.appendChild(el);
+  }
+}
+
+function installCustomFont(id, url) {
+  const fam = `nv-custom-${id}`;
+  const elId = `ff-custom-${id}`;
+  if (!document.getElementById(elId)) {
+    const el = document.createElement("style");
+    el.id = elId;
+    el.textContent = `@font-face{font-family:"${fam}";src:url("${url}");font-display:swap;}`;
+    document.head.appendChild(el);
+  }
+  return fam;
+}
+
+function paintFonts() {
+  const box = $("fonts");
+  if (!box) return;
+  const fonts = state.catalog?.fonts || [];
+  const s = state.settings;
+  box.innerHTML = "";
+  for (const f of fonts) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = f.label;
+    b.title = f.blurb || f.family;
+    b.style.fontFamily = `"${f.family}", sans-serif`;
+    const on = !s.font_id && s.font === f.id;
+    if (on) b.className = "on";
+    b.addEventListener("click", () => {
+      s.font = f.id;
+      s.font_id = "";
+      state.fontName = "";
+      afterLookChange();
+      preview.setSettings({ ...state.settings });
+      syncControls();
+    });
+    box.appendChild(b);
+  }
+  if (s.font_id) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = state.fontName || "Custom";
+    b.className = "on";
+    b.style.fontFamily = `"nv-custom-${s.font_id}", sans-serif`;
+    box.appendChild(b);
+  }
 }
 
 function applyPalette(p) {
@@ -174,6 +245,7 @@ function syncControls() {
   bindColor("bg-color", "bg-hex", "bg_color");
   bindColor("effect-color", "effect-hex", "effect_color");
   bindColor("text-color", "text-hex", "text_color");
+  paintFonts();
   seg($("scenes"), c.scenes, s.scene, (id) => {
     s.scene = id;
     afterLookChange();
@@ -238,11 +310,24 @@ function syncControls() {
   $("text").value = s.text;
   $("subtext").value = s.subtext;
   $("text-size").value = String(s.text_size);
+  $("logo-size").value = String(s.logo_size ?? 0.18);
   preview.setSettings({ ...s });
   $("stage").dataset.format = s.format;
   const hasBg = Boolean(s.background_id);
   $("bg-clear").hidden = !hasBg;
   $("bg-name").textContent = hasBg ? state.bgName || "custom image" : "";
+  const hasFont = Boolean(s.font_id);
+  $("font-clear").hidden = !hasFont;
+  $("font-name").textContent = hasFont ? state.fontName || "custom font" : "";
+  const hasLogo = Boolean(s.logo_id);
+  $("logo-clear").hidden = !hasLogo;
+  $("logo-name").textContent = hasLogo ? state.logoName || "logo" : "";
+  seg($("logopos"), c.logo_positions || [], s.logo_position, (id) => {
+    s.logo_position = id;
+    afterLookChange();
+    preview.setSettings({ ...state.settings });
+    syncControls();
+  });
 }
 
 function renderClipList(clips, selected) {
@@ -339,6 +424,17 @@ function loadPreviewBg(id) {
   img.src = `/api/backgrounds/${id}`;
 }
 
+function loadPreviewLogo(id) {
+  if (!id) {
+    preview.setLogo(null);
+    return;
+  }
+  const img = new Image();
+  img.onload = () => preview.setLogo(img);
+  img.onerror = () => toast("Could not load logo");
+  img.src = `/api/logos/${id}`;
+}
+
 $("bg-import").addEventListener("click", () => $("bg-file").click());
 $("bg-file").addEventListener("change", async (e) => {
   const file = e.target.files?.[0];
@@ -364,6 +460,68 @@ $("bg-clear").addEventListener("click", () => {
   preview.setBackground(null);
   persistClipSettings();
   syncControls();
+});
+
+$("font-import").addEventListener("click", () => $("font-file").click());
+$("font-file").addEventListener("change", async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = "";
+  if (!file) return;
+  try {
+    const fd = new FormData();
+    fd.append("file", file);
+    const meta = await api("/api/fonts", { method: "POST", body: fd });
+    state.settings.font = "custom";
+    state.settings.font_id = meta.id;
+    state.fontName = meta.family || meta.filename || "custom font";
+    state.fontNames[meta.id] = state.fontName;
+    installCustomFont(meta.id, meta.url);
+    persistClipSettings();
+    preview.setSettings({ ...state.settings });
+    syncControls();
+  } catch (err) {
+    toast(err.message || String(err));
+  }
+});
+$("font-clear").addEventListener("click", () => {
+  state.settings.font_id = "";
+  state.settings.font = "archivo";
+  state.fontName = "";
+  persistClipSettings();
+  preview.setSettings({ ...state.settings });
+  syncControls();
+});
+
+$("logo-import").addEventListener("click", () => $("logo-file").click());
+$("logo-file").addEventListener("change", async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = "";
+  if (!file) return;
+  try {
+    const fd = new FormData();
+    fd.append("file", file);
+    const meta = await api("/api/logos", { method: "POST", body: fd });
+    state.settings.logo_id = meta.id;
+    state.logoName = meta.filename || "logo";
+    state.logoNames[meta.id] = state.logoName;
+    loadPreviewLogo(meta.id);
+    persistClipSettings();
+    syncControls();
+  } catch (err) {
+    toast(err.message || String(err));
+  }
+});
+$("logo-clear").addEventListener("click", () => {
+  state.settings.logo_id = "";
+  state.logoName = "";
+  preview.setLogo(null);
+  persistClipSettings();
+  syncControls();
+});
+$("logo-size").addEventListener("input", (e) => {
+  state.settings.logo_size = Number(e.target.value);
+  persistClipSettings();
+  preview.setSettings({ ...state.settings });
 });
 
 $("browse").addEventListener("click", () => $("file").click());
@@ -567,6 +725,8 @@ function pollJob(id) {
 async function boot() {
   state.catalog = await api("/api/presets");
   if (state.catalog.defaults) Object.assign(state.settings, state.catalog.defaults);
+  installCatalogFonts(state.catalog.fonts);
+  preview.setCatalog(state.catalog);
   syncControls();
   preview.setSettings(state.settings);
   preview.start();

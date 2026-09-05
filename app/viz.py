@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from app.audio import interp_feat, interp_spec, window_stereo
-from app.fonts import find_font
+from app.fonts import load_truetype, resolve_font
+from app.logos import apply_logo
 from app.models import VisualSettings
 from app.presets import LOOK, palette_from_settings, resolved_scene
 
@@ -67,27 +70,23 @@ def build_text_layer(
     position: str,
     size: float,
     color: tuple[float, float, float],
+    font_path: Path | None = None,
+    tracking: float = 0.08,
 ) -> np.ndarray | None:
     if not text and not subtext:
         return None
-    font_path = find_font()
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     fs = max(14, int(w * 0.048 * (0.55 + size)))
     sub_fs = max(11, int(fs * 0.42))
-    if font_path:
-        font = ImageFont.truetype(str(font_path), fs)
-        subfont = ImageFont.truetype(str(font_path), sub_fs)
-    else:
-        font = ImageFont.load_default()
-        subfont = font
+    font = load_truetype(font_path, fs)
+    subfont = load_truetype(font_path, sub_fs)
 
-    def draw_spaced(y: int, content: str, fnt: ImageFont.ImageFont, fill: tuple[int, int, int, int], tracking: float) -> int:
+    def draw_spaced(y: int, content: str, fnt: ImageFont.ImageFont, fill: tuple[int, int, int, int], track: float) -> int:
         if not content:
             return 0
-        # measure
         widths = [draw.textlength(ch, font=fnt) for ch in content]
-        gap = fnt.size * tracking
+        gap = fnt.size * track
         total = sum(widths) + gap * max(len(content) - 1, 0)
         x = (w - total) / 2
         for ch, cw in zip(content, widths, strict=True):
@@ -111,8 +110,8 @@ def build_text_layer(
         y = int(h * 0.70)
 
     if text:
-        draw_spaced(y + 3, text, font, shadow, 0.14)
-        used = draw_spaced(y, text, font, fill, 0.14)
+        draw_spaced(y + 3, text, font, shadow, tracking)
+        used = draw_spaced(y, text, font, fill, tracking)
         y += int(used * 1.45)
     if subtext:
         sub_fill = (
@@ -121,8 +120,9 @@ def build_text_layer(
             int(min(color[2] * 255 + 20, 255)),
             240,
         )
-        draw_spaced(y + 2, subtext, subfont, shadow, 0.18)
-        draw_spaced(y, subtext, subfont, sub_fill, 0.18)
+        sub_track = min(tracking + 0.04, 0.18)
+        draw_spaced(y + 2, subtext, subfont, shadow, sub_track)
+        draw_spaced(y, subtext, subfont, sub_fill, sub_track)
 
     arr = np.array(img, dtype=np.uint8)
     return arr
@@ -146,6 +146,7 @@ class VisualEngine:
         height: int,
         clip_start: float,
         background: np.ndarray | None = None,
+        logo: Image.Image | None = None,
     ):
         self.data = data
         self.sr = sr
@@ -155,6 +156,7 @@ class VisualEngine:
         self.h = height
         self.clip_start = clip_start
         self.bg_photo = background
+        self.logo = logo
         self.scene = resolved_scene(settings)
         self.palette = palette_from_settings(settings)
         self.look = LOOK
@@ -171,6 +173,7 @@ class VisualEngine:
         )
         self.part_vel = (self.rng.random((n_part, 2), dtype=np.float32) - 0.5) * 2.0
         self.part_life = self.rng.random(n_part, dtype=np.float32)
+        font_path, tracking = resolve_font(settings.font, settings.font_id)
         self.text_layer = build_text_layer(
             width,
             height,
@@ -179,6 +182,8 @@ class VisualEngine:
             settings.text_position,
             settings.text_size,
             self.palette["accent"],
+            font_path=font_path,
+            tracking=tracking,
         )
         self.yy, self.xx = np.mgrid[0:height, 0:width].astype(np.float32)
 
@@ -576,6 +581,15 @@ class VisualEngine:
         img = cv2.resize(crop, (self.w, self.h), interpolation=cv2.INTER_LINEAR)
 
         img = np.clip(img, 0.0, 1.0)
+        if self.logo is not None:
+            apply_logo(
+                img,
+                self.logo,
+                self.settings.logo_position,
+                float(self.settings.logo_size),
+                float(self.settings.logo_opacity),
+                self.settings.text_position,
+            )
         if self.text_layer is not None:
             apply_text(img, self.text_layer, float(self.settings.text_opacity))
         return (img * 255.0 + 0.5).astype(np.uint8)

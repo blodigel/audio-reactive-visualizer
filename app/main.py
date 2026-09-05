@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import mimetypes
 import re
 import uuid
 from pathlib import Path
@@ -15,7 +16,9 @@ from app.backgrounds import ALLOWED_EXT, BackgroundError, save_upload
 from app.clips import suggest_clips
 from app.config import config
 from app.demo import write_demo_wav
+from app.fonts import ALLOWED_FONT_EXT, FontError, MAX_FONT_BYTES, custom_path, save_font
 from app.jobs import manager
+from app.logos import ALLOWED_LOGO_EXT, LogoError, save_logo
 from app.models import RenderRequest, SuggestIn
 from app.presets import public_catalog
 import numpy as np
@@ -44,6 +47,8 @@ def _load_meta(track_id: str) -> dict:
 
 def create_app() -> FastAPI:
     config.ensure_dirs()
+    mimetypes.add_type("font/ttf", ".ttf")
+    mimetypes.add_type("font/otf", ".otf")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     app = FastAPI(title="Noise Visualizer", version="1.0.0")
 
@@ -185,6 +190,105 @@ def create_app() -> FastAPI:
         if not path.is_file():
             raise HTTPException(404, "Background not found")
         return FileResponse(path, media_type="image/png", filename="background.png")
+
+    @app.post("/api/fonts")
+    async def upload_font(file: UploadFile = File(...)) -> dict:
+        name = file.filename or "custom.ttf"
+        ext = Path(name).suffix.lower()
+        if ext not in ALLOWED_FONT_EXT:
+            raise HTTPException(400, "Use a TTF or OTF font")
+        font_id = uuid.uuid4().hex[:16]
+        raw = config.fonts_dir / f"{font_id}.src{ext}"
+        dest = config.fonts_dir / f"{font_id}{ext}"
+        written = 0
+        try:
+            with raw.open("wb") as out:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > MAX_FONT_BYTES:
+                        raise HTTPException(413, "Font is larger than 8 MB")
+                    out.write(chunk)
+        except HTTPException:
+            raw.unlink(missing_ok=True)
+            raise
+        finally:
+            await file.close()
+        if written < 64:
+            raw.unlink(missing_ok=True)
+            raise HTTPException(400, "File is empty")
+        try:
+            family = save_font(raw, dest)
+        except FontError as exc:
+            dest.unlink(missing_ok=True)
+            raise HTTPException(400, str(exc)) from exc
+        finally:
+            raw.unlink(missing_ok=True)
+        media = "font/otf" if ext == ".otf" else "font/ttf"
+        return {
+            "id": font_id,
+            "filename": name,
+            "family": family,
+            "url": f"/api/fonts/{font_id}",
+            "media_type": media,
+        }
+
+    @app.get("/api/fonts/{font_id}")
+    def get_font(font_id: str) -> FileResponse:
+        _check_id(font_id)
+        path = custom_path(font_id)
+        if not path:
+            raise HTTPException(404, "Font not found")
+        media = "font/otf" if path.suffix.lower() == ".otf" else "font/ttf"
+        return FileResponse(path, media_type=media, filename=path.name)
+
+    @app.post("/api/logos")
+    async def upload_logo(file: UploadFile = File(...)) -> dict:
+        name = file.filename or "logo.png"
+        ext = Path(name).suffix.lower()
+        if ext not in ALLOWED_LOGO_EXT:
+            raise HTTPException(400, "Use a PNG, JPEG or WebP logo")
+        logo_id = uuid.uuid4().hex[:16]
+        raw = config.logos_dir / f"{logo_id}.src{ext}"
+        dest = config.logos_dir / f"{logo_id}.png"
+        limit = 12 * 1024 * 1024
+        written = 0
+        try:
+            with raw.open("wb") as out:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > limit:
+                        raise HTTPException(413, "Logo is larger than 12 MB")
+                    out.write(chunk)
+        except HTTPException:
+            raw.unlink(missing_ok=True)
+            raise
+        finally:
+            await file.close()
+        if written < 32:
+            raw.unlink(missing_ok=True)
+            raise HTTPException(400, "File is empty")
+        try:
+            save_logo(raw, dest)
+        except LogoError as exc:
+            dest.unlink(missing_ok=True)
+            raise HTTPException(400, str(exc)) from exc
+        finally:
+            raw.unlink(missing_ok=True)
+        return {"id": logo_id, "filename": name, "url": f"/api/logos/{logo_id}"}
+
+    @app.get("/api/logos/{logo_id}")
+    def get_logo(logo_id: str) -> FileResponse:
+        _check_id(logo_id)
+        path = config.logos_dir / f"{logo_id}.png"
+        if not path.is_file():
+            raise HTTPException(404, "Logo not found")
+        return FileResponse(path, media_type="image/png", filename="logo.png")
 
     @app.post("/api/jobs")
     def start_job(body: RenderRequest) -> dict:
