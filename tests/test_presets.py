@@ -1,4 +1,4 @@
-from app.models import VisualSettings
+from app.models import ClipIn, VisualSettings
 from app.presets import (
     COLOR_PRESETS,
     normalize_hex,
@@ -43,3 +43,12 @@ def test_rejects_bad_color():
 
     with pytest.raises(Exception):
         VisualSettings(bg_color="red")
+
+
+def test_clip_owns_settings():
+    clip = ClipIn(start=1.0, end=4.0, settings=VisualSettings(scene="starburst", grain=0.9, text="A"))
+    assert clip.settings.scene == "starburst"
+    assert clip.settings.grain == 0.9
+    assert clip.settings.text == "A"
+    plain = ClipIn(start=0.0, end=2.0)
+    assert plain.settings is None

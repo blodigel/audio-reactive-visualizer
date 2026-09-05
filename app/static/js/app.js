@@ -37,12 +37,23 @@ const state = {
   job: null,
   poll: null,
   bgName: "",
+  bgNames: {},
+  activeClipId: null,
 };
 
 const audioEl = new Audio();
 audioEl.preload = "auto";
 const preview = new Preview($("viz"));
 const wave = new Waveform($("wave"), ({ clips, selected }) => {
+  if (selected !== state.activeClipId) {
+    const prev = wave.clips.find((c) => c.id === state.activeClipId);
+    if (prev) prev.settings = { ...state.settings };
+    state.activeClipId = selected;
+    loadClipSettings(selected);
+  }
+  for (const c of clips) {
+    if (!c.settings) c.settings = { ...state.settings };
+  }
   renderClipList(clips, selected);
   updatePlayRange();
 });
@@ -71,10 +82,46 @@ function seg(container, items, current, onPick, labelKey = "label") {
   }
 }
 
+function persistClipSettings() {
+  const c = wave.selectedClip();
+  if (c) c.settings = { ...state.settings };
+}
+
+function afterLookChange() {
+  persistClipSettings();
+  const label = $("clip-edit");
+  const clip = wave.selectedClip();
+  if (label && clip) {
+    const idx = wave.clips.indexOf(clip) + 1;
+    label.textContent = `Editing clip ${idx} · ${state.settings.scene || "mixed"}`;
+  }
+  wave.draw();
+  renderClipList(wave.clips, wave.selected);
+}
+
+function loadClipSettings(id) {
+  const c = wave.clips.find((x) => x.id === id);
+  const label = $("clip-edit");
+  if (!c) {
+    if (label) label.textContent = "Settings apply to the selected clip";
+    return;
+  }
+  if (!c.settings) c.settings = { ...state.settings };
+  else Object.assign(state.settings, c.settings);
+  state.bgName = state.bgNames[state.settings.background_id] || (state.settings.background_id ? "custom image" : "");
+  const idx = wave.clips.indexOf(c) + 1;
+  if (label) {
+    label.textContent = `Editing clip ${idx} · ${c.settings.scene || "mixed"}`;
+  }
+  loadPreviewBg(state.settings.background_id);
+  syncControls();
+}
+
 function applyPalette(p) {
   state.settings.bg_color = p.bg_color;
   state.settings.effect_color = p.effect_color;
   state.settings.text_color = p.text_color;
+  afterLookChange();
   preview.setSettings({ ...state.settings });
   syncControls();
 }
@@ -88,8 +135,11 @@ function bindColor(inputId, hexId, key) {
   const apply = () => {
     state.settings[key] = input.value;
     hex.textContent = input.value;
+    persistClipSettings();
     preview.setSettings({ ...state.settings });
     paintSwatches();
+    wave.draw();
+    renderClipList(wave.clips, wave.selected);
   };
   input.oninput = apply;
   input.onchange = apply;
@@ -126,6 +176,7 @@ function syncControls() {
   bindColor("text-color", "text-hex", "text_color");
   seg($("scenes"), c.scenes, s.scene, (id) => {
     s.scene = id;
+    afterLookChange();
     syncControls();
   });
   seg($("formats"), c.formats, s.format, (id) => {
@@ -134,10 +185,12 @@ function syncControls() {
     const f = c.formats.find((x) => x.id === id);
     $("format-tag").textContent = f?.ratio || id;
     preview.draw();
+    afterLookChange();
     syncControls();
   });
   seg($("qualities"), c.qualities, s.quality, (id) => {
     s.quality = id;
+    afterLookChange();
     syncControls();
   });
   seg(
@@ -150,6 +203,7 @@ function syncControls() {
     s.text_position,
     (id) => {
       s.text_position = id;
+      afterLookChange();
       syncControls();
     }
   );
@@ -175,7 +229,8 @@ function syncControls() {
     input.addEventListener("input", () => {
       s[sl.key] = Number(input.value);
       paint();
-      preview.setSettings(s);
+      persistClipSettings();
+      preview.setSettings({ ...state.settings });
     });
     wrap.appendChild(input);
     if (box) box.appendChild(wrap);
@@ -198,7 +253,9 @@ function renderClipList(clips, selected) {
     b.type = "button";
     b.className = "clip-chip" + (c.id === selected ? " on" : "");
     const len = (c.end - c.start).toFixed(1);
-    b.innerHTML = `${i + 1} · ${formatTime(c.start)}–${formatTime(c.end)} <span class="why">${len}s ${c.reason || ""}</span>`;
+    const scene = (c.settings && c.settings.scene) || "";
+    const col = (c.settings && c.settings.effect_color) || "#d4523e";
+    b.innerHTML = `${i + 1} · ${formatTime(c.start)}–${formatTime(c.end)} <span class="why">${len}s ${scene}</span><span class="dot" style="background:${col}"></span>`;
     b.addEventListener("click", () => {
       wave.selected = c.id;
       wave._emit();
@@ -293,7 +350,9 @@ $("bg-file").addEventListener("change", async (e) => {
     const meta = await api("/api/backgrounds", { method: "POST", body: fd });
     state.settings.background_id = meta.id;
     state.bgName = meta.filename || "custom image";
+    state.bgNames[meta.id] = state.bgName;
     loadPreviewBg(meta.id);
+    persistClipSettings();
     syncControls();
   } catch (err) {
     toast(err.message || String(err));
@@ -303,6 +362,7 @@ $("bg-clear").addEventListener("click", () => {
   state.settings.background_id = "";
   state.bgName = "";
   preview.setBackground(null);
+  persistClipSettings();
   syncControls();
 });
 
@@ -385,15 +445,18 @@ requestAnimationFrame(tick);
 
 $("text").addEventListener("input", (e) => {
   state.settings.text = e.target.value;
-  preview.setSettings(state.settings);
+  persistClipSettings();
+  preview.setSettings({ ...state.settings });
 });
 $("subtext").addEventListener("input", (e) => {
   state.settings.subtext = e.target.value;
-  preview.setSettings(state.settings);
+  persistClipSettings();
+  preview.setSettings({ ...state.settings });
 });
 $("text-size").addEventListener("input", (e) => {
   state.settings.text_size = Number(e.target.value);
-  preview.setSettings(state.settings);
+  persistClipSettings();
+  preview.setSettings({ ...state.settings });
 });
 
 $("add-clip").addEventListener("click", () => {
@@ -440,7 +503,11 @@ $("render").addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         track_id: state.track.id,
-        clips: wave.clips.map((c) => ({ start: c.start, end: c.end })),
+        clips: wave.clips.map((c) => ({
+          start: c.start,
+          end: c.end,
+          settings: c.settings || state.settings,
+        })),
         settings: state.settings,
       }),
     });

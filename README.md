@@ -12,7 +12,7 @@ Runs locally in Docker. Nothing is uploaded to a third party.
 
 1. Drop a **WAV**.
 2. See the waveform, onsets, and **suggested cut points**.
-3. Drag, resize, add or remove the bits of the track you want (8–30s, Instagram-friendly).
+3. Drag, resize, add or remove the bits of the track you want (8–30s, Instagram-friendly). **Each clip has its own look** — select a clip, then change effect, colors, text or background. Add another clip and style it differently.
 4. Pick **background, effect and text colors** (or a palette swatch). Optionally **import a background image** (AI still, photo, PNG/JPEG/WebP) and set **BG tint** (how hard the background color washes over it). Then ride **grain, jitter, glitch, bloom, scanlines, chroma, trail, reactivity**.
 5. Add **title / subtext** on the frame.
 6. Live preview in the browser (reacts to the audio).

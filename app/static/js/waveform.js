@@ -1,3 +1,12 @@
+function hexRgba(hex, a) {
+  const h = String(hex || "#d4523e").replace("#", "");
+  if (h.length !== 6) return `rgba(212,82,62,${a})`;
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
 function uid() {
   return Math.random().toString(16).slice(2, 10);
 }
@@ -243,9 +252,10 @@ export class Waveform {
       const x1 = (clip.start / dur) * w;
       const x2 = (clip.end / dur) * w;
       const on = clip.id === this.selected;
-      ctx.fillStyle = on ? "rgba(212, 82, 62, 0.22)" : "rgba(237, 230, 220, 0.06)";
+      const col = (clip.settings && clip.settings.effect_color) || "#d4523e";
+      ctx.fillStyle = hexRgba(col, on ? 0.28 : 0.12);
       ctx.fillRect(x1, 0, Math.max(2, x2 - x1), h);
-      ctx.strokeStyle = on ? "#d4523e" : "rgba(237, 230, 220, 0.2)";
+      ctx.strokeStyle = on ? col : hexRgba(col, 0.45);
       ctx.lineWidth = dpr;
       ctx.strokeRect(x1 + 0.5, 0.5, Math.max(2, x2 - x1 - 1), h - 1);
       const hw = 3 * dpr;

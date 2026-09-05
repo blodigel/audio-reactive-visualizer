@@ -471,6 +471,21 @@ button { cursor: pointer; }
 }
 .clip-chip.on { border-color: var(--accent); color: var(--text); background: var(--accent-dim); }
 .clip-chip .why { color: var(--faint); margin-left: 8px; }
+.clip-chip .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 8px;
+  vertical-align: middle;
+  border: 1px solid var(--hair-2);
+}
+.clip-edit {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent-soft);
+}
 
 .toast {
   position: fixed;

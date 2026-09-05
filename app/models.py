@@ -25,21 +25,6 @@ QualityId = Literal["draft", "standard", "high"]
 TextPosition = Literal["top", "center", "lower"]
 
 
-class ClipIn(BaseModel):
-    start: float = Field(ge=0)
-    end: float = Field(gt=0)
-
-    @model_validator(mode="after")
-    def order(self) -> ClipIn:
-        if self.end <= self.start:
-            raise ValueError("Clip end must be after start")
-        if self.end - self.start < 0.5:
-            raise ValueError("Clip must be at least 0.5 seconds")
-        if self.end - self.start > 90:
-            raise ValueError("Clip cannot be longer than 90 seconds (Reels limit)")
-        return self
-
-
 _HEX = re.compile(r"^#?[0-9A-Fa-f]{6}$")
 
 
@@ -98,6 +83,22 @@ class VisualSettings(BaseModel):
         if not re.fullmatch(r"[a-fA-F0-9]{12,32}", raw):
             raise ValueError("Invalid background id")
         return raw.lower()
+
+
+class ClipIn(BaseModel):
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    settings: VisualSettings | None = None
+
+    @model_validator(mode="after")
+    def order(self) -> ClipIn:
+        if self.end <= self.start:
+            raise ValueError("Clip end must be after start")
+        if self.end - self.start < 0.5:
+            raise ValueError("Clip must be at least 0.5 seconds")
+        if self.end - self.start > 90:
+            raise ValueError("Clip cannot be longer than 90 seconds (Reels limit)")
+        return self
 
 
 class SuggestIn(BaseModel):

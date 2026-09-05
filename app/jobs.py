@@ -118,12 +118,13 @@ class JobManager:
                 return job.cancel
 
             try:
+                clip_settings = clip.settings or settings
                 info = render_clip(
                     wav_path=job.wav_path,
                     out_path=dest,
                     start=clip.start,
                     end=clip.end,
-                    settings=settings,
+                    settings=clip_settings,
                     on_progress=on_progress,
                     should_cancel=should_cancel,
                 )
