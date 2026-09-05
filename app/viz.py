@@ -110,13 +110,6 @@ def build_text_layer(
     else:
         y = int(h * 0.70)
 
-    scrim_h = fs + (sub_fs + int(fs * 0.4) if subtext else 0) + int(fs * 0.8)
-    scrim = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    sdraw = ImageDraw.Draw(scrim)
-    sdraw.rectangle((0, y - int(fs * 0.35), w, y + scrim_h), fill=(0, 0, 0, 110))
-    img = Image.alpha_composite(img, scrim)
-    draw = ImageDraw.Draw(img)
-
     if text:
         draw_spaced(y + 3, text, font, shadow, 0.14)
         used = draw_spaced(y, text, font, fill, 0.14)

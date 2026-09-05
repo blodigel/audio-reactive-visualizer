@@ -72,6 +72,7 @@ function applyPalette(p) {
   state.settings.bg_color = p.bg_color;
   state.settings.effect_color = p.effect_color;
   state.settings.text_color = p.text_color;
+  preview.setSettings({ ...state.settings });
   syncControls();
 }
 
@@ -81,12 +82,14 @@ function bindColor(inputId, hexId, key) {
   if (!input || !hex) return;
   input.value = state.settings[key];
   hex.textContent = state.settings[key];
-  input.oninput = () => {
+  const apply = () => {
     state.settings[key] = input.value;
     hex.textContent = input.value;
-    preview.setSettings(state.settings);
+    preview.setSettings({ ...state.settings });
     paintSwatches();
   };
+  input.oninput = apply;
+  input.onchange = apply;
 }
 
 function paintSwatches() {

@@ -23,6 +23,7 @@ export class Preview {
     this.analyser = null;
     this.srcNode = null;
     this.running = false;
+    this._lookKey = "";
     this.grain = this._makeGrain();
     this.trail = document.createElement("canvas");
     this.tctx = this.trail.getContext("2d");
@@ -51,6 +52,12 @@ export class Preview {
 
   setSettings(s) {
     this.settings = s;
+    const key = `${s?.bg_color || ""}|${s?.effect_color || ""}|${s?.text_color || ""}|${s?.scene || ""}`;
+    if (key !== this._lookKey) {
+      this._lookKey = key;
+      this.tctx.clearRect(0, 0, this.trail.width || 0, this.trail.height || 0);
+    }
+    if (this.running) this.draw();
   }
 
   async attachAudio(audioEl, arrayBuffer) {
@@ -144,10 +151,16 @@ export class Preview {
     const pal = paletteFromSettings(s);
     const b = this._bands();
     const trail = 0.5 + 0.45 * (s.trail ?? 0.4);
-
-    this.tctx.globalAlpha = trail;
-    this.tctx.drawImage(this.canvas, 0, 0);
-    this.tctx.globalAlpha = 1;
+    const lookKey = `${s.bg_color || ""}|${s.effect_color || ""}|${s.text_color || ""}|${s.scene || ""}`;
+    const lookChanged = lookKey !== this._lookKey;
+    if (lookChanged) {
+      this._lookKey = lookKey;
+      this.tctx.clearRect(0, 0, this.trail.width, this.trail.height);
+    } else {
+      this.tctx.globalAlpha = trail;
+      this.tctx.drawImage(this.canvas, 0, 0);
+      this.tctx.globalAlpha = 1;
+    }
 
     ctx.fillStyle = `rgb(${pal.bg[0]},${pal.bg[1]},${pal.bg[2]})`;
     ctx.fillRect(0, 0, w, h);
