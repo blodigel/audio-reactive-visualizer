@@ -78,6 +78,10 @@ SCENE_META: dict[SceneId, dict[str, str]] = {
     "field": {"label": "Field", "blurb": "Warped analog plasma."},
     "particles": {"label": "Particles", "blurb": "Sparks that explode on hits."},
     "bars": {"label": "Bars", "blurb": "Harsh spectral columns."},
+    "starburst": {"label": "Starburst", "blurb": "Radial rays from the spectrum."},
+    "grid": {"label": "Grid", "blurb": "Warped wireframe, bass-punched."},
+    "kaleido": {"label": "Kaleido", "blurb": "Six-fold mirrored lissajous."},
+    "orbits": {"label": "Orbits", "blurb": "Rings of dots locked to the beat."},
 }
 
 
@@ -153,6 +157,7 @@ def public_catalog() -> dict[str, Any]:
             {"id": "high", "label": "High", "blurb": "1080, slower, cleaner encode."},
         ],
         "sliders": [
+            {"key": "bg_opacity", "label": "BG tint", "blurb": "Color wash over an imported background. 0 = photo only."},
             {"key": "grain", "label": "Grain", "blurb": "Film grain / analog snow"},
             {"key": "jitter", "label": "Jitter", "blurb": "Frame shake, bass-linked"},
             {"key": "bloom", "label": "Bloom", "blurb": "Glow on highlights"},

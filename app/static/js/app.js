@@ -13,6 +13,7 @@ const state = {
     effect_color: "#d63d24",
     text_color: "#ede6dc",
     background_id: "",
+    bg_opacity: 0.22,
     format: "reels",
     quality: "standard",
     fps: 30,

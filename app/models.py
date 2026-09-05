@@ -15,6 +15,10 @@ SceneId = Literal[
     "particles",
     "bars",
     "mixed",
+    "starburst",
+    "grid",
+    "kaleido",
+    "orbits",
 ]
 FormatId = Literal["reels", "square", "portrait", "landscape"]
 QualityId = Literal["draft", "standard", "high"]
@@ -54,6 +58,7 @@ class VisualSettings(BaseModel):
     effect_color: str = "#d63d24"
     text_color: str = "#ede6dc"
     background_id: str = ""
+    bg_opacity: float = Field(default=0.22, ge=0, le=1)
     format: FormatId = "reels"
     quality: QualityId = "standard"
     fps: int = Field(default=30, ge=12, le=60)

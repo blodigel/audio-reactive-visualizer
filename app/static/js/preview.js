@@ -59,7 +59,7 @@ export class Preview {
 
   setSettings(s) {
     this.settings = s;
-    const key = `${s?.bg_color || ""}|${s?.effect_color || ""}|${s?.text_color || ""}|${s?.scene || ""}|${s?.background_id || ""}`;
+    const key = `${s?.bg_color || ""}|${s?.effect_color || ""}|${s?.text_color || ""}|${s?.scene || ""}|${s?.background_id || ""}|${s?.bg_opacity ?? ""}`;
     if (key !== this._lookKey) {
       this._lookKey = key;
       this.tctx.clearRect(0, 0, this.trail.width || 0, this.trail.height || 0);
@@ -158,7 +158,7 @@ export class Preview {
     const pal = paletteFromSettings(s);
     const b = this._bands();
     const trail = 0.5 + 0.45 * (s.trail ?? 0.4);
-    const lookKey = `${s.bg_color || ""}|${s.effect_color || ""}|${s.text_color || ""}|${s.scene || ""}|${s.background_id || ""}`;
+    const lookKey = `${s.bg_color || ""}|${s.effect_color || ""}|${s.text_color || ""}|${s.scene || ""}|${s.background_id || ""}|${s.bg_opacity ?? ""}`;
     const lookChanged = lookKey !== this._lookKey;
     if (lookChanged) {
       this._lookKey = lookKey;
@@ -169,11 +169,13 @@ export class Preview {
       this.tctx.globalAlpha = 1;
     }
 
-    ctx.fillStyle = `rgb(${pal.bg[0]},${pal.bg[1]},${pal.bg[2]})`;
-    ctx.fillRect(0, 0, w, h);
+    const tint = s.bg_opacity ?? 0.22;
     if (this.bgImage) {
       drawCover(ctx, this.bgImage, w, h);
-      ctx.fillStyle = `rgba(${pal.bg[0]},${pal.bg[1]},${pal.bg[2]},0.22)`;
+      ctx.fillStyle = `rgba(${pal.bg[0]},${pal.bg[1]},${pal.bg[2]},${tint})`;
+      ctx.fillRect(0, 0, w, h);
+    } else {
+      ctx.fillStyle = `rgb(${pal.bg[0]},${pal.bg[1]},${pal.bg[2]})`;
       ctx.fillRect(0, 0, w, h);
     }
 
@@ -210,6 +212,10 @@ export class Preview {
     if (scene === "particles" || scene === "mixed") {
       this._particles(ctx, w, h, b, pal.fg);
     }
+    if (scene === "starburst") this._starburst(ctx, w, h, b, pal.fg);
+    if (scene === "grid") this._grid(ctx, w, h, b, pal.fg);
+    if (scene === "kaleido") this._kaleido(ctx, w, h, scope, pal.fg);
+    if (scene === "orbits") this._orbits(ctx, w, h, b, pal.fg);
 
     if ((s.glitch ?? 0) > 0.2 && b.energy > 0.55) {
       const slices = 2 + Math.floor((s.glitch ?? 0) * 6);
@@ -321,6 +327,97 @@ export class Preview {
       p.x = (p.x + p.vx + 1) % 1;
       p.y = (p.y + p.vy + 1) % 1;
       ctx.fillRect(p.x * w, p.y * h, 2, 2);
+    }
+  }
+
+  _starburst(ctx, w, h, b, rgb) {
+    const n = 48;
+    const t = this.audio?.currentTime || 0;
+    const cx = w / 2;
+    const cy = h / 2;
+    const r0 = Math.min(w, h) * 0.04;
+    const span = Math.min(w, h) * (0.22 + 0.28 * (this.settings?.intensity ?? 0.7));
+    ctx.lineCap = "round";
+    for (let i = 0; i < n; i++) {
+      const idx = Math.floor(i * (b.freq.length / n));
+      const mag = (b.freq[idx] || 0) / 255;
+      const a = t * 0.2 + (i / n) * Math.PI * 2;
+      const r1 = r0 + mag * span;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+      ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+      ctx.strokeStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${0.35 + mag * 0.65})`;
+      ctx.lineWidth = 1 + mag * 2;
+      ctx.stroke();
+    }
+  }
+
+  _grid(ctx, w, h, b, rgb) {
+    const t = this.audio?.currentTime || 0;
+    const step = Math.max(14, Math.min(w, h) * (0.08 - 0.03 * b.bass));
+    const amp = 4 + 18 * b.mid * (this.settings?.intensity ?? 0.7);
+    ctx.strokeStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.55)`;
+    ctx.lineWidth = 1;
+    for (let x = 0; x < w + step; x += step) {
+      ctx.beginPath();
+      for (let y = 0; y <= h; y += 8) {
+        const dx = Math.sin(y * 0.018 + t * 2.2) * amp;
+        if (y === 0) ctx.moveTo(x + dx, y);
+        else ctx.lineTo(x + dx, y);
+      }
+      ctx.stroke();
+    }
+    for (let y = 0; y < h + step; y += step) {
+      ctx.beginPath();
+      for (let x = 0; x <= w; x += 8) {
+        const dy = Math.sin(x * 0.016 + t * 1.7) * amp * 0.7;
+        if (x === 0) ctx.moveTo(x, y + dy);
+        else ctx.lineTo(x, y + dy);
+      }
+      ctx.stroke();
+    }
+  }
+
+  _kaleido(ctx, w, h, scope, rgb) {
+    const cx = w / 2;
+    const cy = h / 2;
+    for (let k = 0; k < 6; k++) {
+      const a = (k * Math.PI) / 3;
+      const c = Math.cos(a);
+      const s = Math.sin(a);
+      const xs = [];
+      const ys = [];
+      for (let i = 0; i < scope.lx.length; i++) {
+        const x = scope.lx[i] - cx;
+        const y = scope.ly[i] - cy;
+        xs.push(x * c - y * s + cx);
+        ys.push(x * s + y * c + cy);
+      }
+      strokePath(ctx, xs, ys, rgb, 1.4);
+    }
+  }
+
+  _orbits(ctx, w, h, b, rgb) {
+    const t = this.audio?.currentTime || 0;
+    const cx = w / 2;
+    const cy = h / 2;
+    for (let ring = 0; ring < 5; ring++) {
+      const n = 10 + ring * 5;
+      const r = Math.min(w, h) * (0.07 + ring * 0.07) * (1 + b.bass * 0.18);
+      const speed = 0.35 + ring * 0.12;
+      for (let i = 0; i < n; i++) {
+        const u = i / n;
+        const idx = Math.floor(u * (b.freq.length - 1));
+        const mag = (b.freq[idx] || 0) / 255;
+        const a = t * speed + u * Math.PI * 2;
+        const x = cx + Math.cos(a) * r;
+        const y = cy + Math.sin(a) * r * 0.72;
+        ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${0.4 + mag * 0.6})`;
+        const rad = 1 + mag * 3 * (this.settings?.intensity ?? 0.7);
+        ctx.beginPath();
+        ctx.arc(x, y, rad, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   }
 

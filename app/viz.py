@@ -342,6 +342,78 @@ class VisualEngine:
             cv2.circle(overlay, (x, y), rad, color_bgr, -1, cv2.LINE_AA)
         cv2.add(layer, overlay, layer)
 
+    def _draw_starburst(self, layer: np.ndarray, feat: dict, t: float, color_bgr: tuple[int, int, int]) -> None:
+        spec = np.asarray(feat["spec"], dtype=np.float32)
+        overlay = np.zeros_like(layer)
+        cx, cy = self.w * 0.5, self.h * 0.5
+        n = spec.shape[0]
+        r0 = min(self.w, self.h) * 0.04
+        span = min(self.w, self.h) * (0.22 + 0.28 * self.settings.intensity)
+        rot = t * (0.15 + feat["mid"] * 0.4)
+        for i, v in enumerate(spec):
+            a = rot + (i / n) * np.pi * 2
+            r1 = r0 + float(v) * span
+            x0 = int(cx + np.cos(a) * r0)
+            y0 = int(cy + np.sin(a) * r0)
+            x1 = int(cx + np.cos(a) * r1)
+            y1 = int(cy + np.sin(a) * r1)
+            col = tuple(int(c * (0.35 + 0.65 * float(v))) for c in color_bgr)
+            cv2.line(overlay, (x0, y0), (x1, y1), col, 1, cv2.LINE_AA)
+        cv2.add(layer, overlay, layer)
+
+    def _draw_grid(self, layer: np.ndarray, feat: dict, t: float, color_bgr: tuple[int, int, int]) -> None:
+        overlay = np.zeros_like(layer)
+        step = max(14, int(min(self.w, self.h) * (0.08 - 0.03 * feat["bass"])))
+        amp = (4 + 18 * feat["mid"] * self.settings.intensity)
+        col = tuple(int(c * 0.75) for c in color_bgr)
+        for x in range(0, self.w + step, step):
+            pts = []
+            for y in range(0, self.h + 8, 8):
+                dx = np.sin(y * 0.018 + t * 2.2) * amp
+                pts.append([x + dx, y])
+            arr = np.array(pts, dtype=np.int32)
+            if len(arr) >= 2:
+                cv2.polylines(overlay, [arr], False, col, 1, cv2.LINE_AA)
+        for y in range(0, self.h + step, step):
+            pts = []
+            for x in range(0, self.w + 8, 8):
+                dy = np.sin(x * 0.016 + t * 1.7) * amp * 0.7
+                pts.append([x, y + dy])
+            arr = np.array(pts, dtype=np.int32)
+            if len(arr) >= 2:
+                cv2.polylines(overlay, [arr], False, col, 1, cv2.LINE_AA)
+        cv2.add(layer, overlay, layer)
+
+    def _draw_kaleido(self, layer: np.ndarray, t: float, color_bgr: tuple[int, int, int]) -> None:
+        pts = self._liss_pts(t, n=420)
+        cx, cy = self.w * 0.5, self.h * 0.5
+        x = pts[:, 0] - cx
+        y = pts[:, 1] - cy
+        for k in range(6):
+            a = k * (np.pi / 3)
+            c, s = np.cos(a), np.sin(a)
+            rot = np.stack([x * c - y * s + cx, x * s + y * c + cy], axis=1)
+            glow_polyline(layer, rot, color_bgr, 1)
+
+    def _draw_orbits(self, layer: np.ndarray, feat: dict, t: float, color_bgr: tuple[int, int, int]) -> None:
+        overlay = np.zeros_like(layer)
+        cx, cy = int(self.w * 0.5), int(self.h * 0.5)
+        spec = np.asarray(feat["spec"], dtype=np.float32)
+        for ring in range(5):
+            n = 10 + ring * 5
+            r = min(self.w, self.h) * (0.07 + ring * 0.07) * (1.0 + feat["bass"] * 0.18)
+            speed = 0.35 + ring * 0.12
+            for i in range(n):
+                u = i / n
+                mag = float(spec[int(u * (spec.shape[0] - 1))])
+                a = t * speed + u * np.pi * 2
+                x = int(cx + np.cos(a) * r)
+                y = int(cy + np.sin(a) * r * 0.72)
+                rad = 1 + int(mag * 3 * self.settings.intensity)
+                col = tuple(int(c * (0.4 + 0.6 * mag)) for c in color_bgr)
+                cv2.circle(overlay, (x, y), max(rad, 1), col, -1, cv2.LINE_AA)
+        cv2.add(layer, overlay, layer)
+
     def _snow(self, img: np.ndarray, feat: dict, frame_i: int) -> None:
         density = 0.002 + 0.01 * float(self.settings.grain) * (0.25 + feat["high"] + feat["air"])
         n = int(self.h * self.w * density)
@@ -374,6 +446,14 @@ class VisualEngine:
         elif scene == "mixed":
             glow_polyline(layer, self._scope_pts(t), fg, 2)
             self._draw_particles(layer, feat, fg)
+        elif scene == "starburst":
+            self._draw_starburst(layer, feat, t, fg)
+        elif scene == "grid":
+            self._draw_grid(layer, feat, t, fg)
+        elif scene == "kaleido":
+            self._draw_kaleido(layer, t, fg)
+        elif scene == "orbits":
+            self._draw_orbits(layer, feat, t, fg)
         else:
             glow_polyline(layer, self._scope_pts(t), fg, 2)
 
@@ -385,8 +465,11 @@ class VisualEngine:
         img = self.trail * decay
         field = self._field(feat, t)
         if self.bg_photo is not None:
-            wash = field - _rgb(self.palette["bg"])
-            live = np.clip(self.bg_photo * 0.92 + wash * 0.55, 0.0, 1.0)
+            op = float(np.clip(self.settings.bg_opacity, 0.0, 1.0))
+            tint = _rgb(self.palette["bg"])
+            wash = field - tint
+            live = self.bg_photo * (1.0 - op) + tint * op
+            live = np.clip(live + wash * 0.35 * (1.0 - 0.5 * op), 0.0, 1.0)
         else:
             live = field
         img = np.clip(live * (0.72 + 0.15 * (1.0 - self.settings.trail)) + img * 0.85, 0.0, 1.0)
