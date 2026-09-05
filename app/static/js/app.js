@@ -1,6 +1,6 @@
-import { api, uploadWav } from "./api.js?v=19";
-import { Preview } from "./preview.js?v=19";
-import { Waveform, formatTime } from "./waveform.js?v=19";
+import { api, uploadWav } from "./api.js?v=20";
+import { Preview } from "./preview.js?v=20";
+import { Waveform, formatTime } from "./waveform.js?v=20";
 
 const $ = (id) => document.getElementById(id);
 
@@ -24,9 +24,6 @@ const state = {
     logo_chroma: 0,
     logo_jitter: 0,
     bg_opacity: 0.22,
-    format: "reels",
-    quality: "standard",
-    fps: 30,
     grain: 0.48,
     jitter: 0.32,
     bloom: 0.22,
@@ -49,6 +46,8 @@ const state = {
     text_jitter: 0,
     seed: 1,
   },
+  // Output belongs to the render job, not to a clip's look.
+  output: { format: "reels", quality: "standard", fps: 30 },
   job: null,
   poll: null,
   bgName: "",
@@ -63,12 +62,17 @@ const state = {
 
 const SESSION_KEY = "nv-session-v1";
 const LOOKS_KEY = "nv-looks-v1";
+// A look is style: scene, palette, background, sliders, type and logo styling.
+// Not content (title, subtext, logo file) and not output (format, quality, fps).
 const LOOK_KEYS = [
   "scene",
   "bg_color",
   "effect_color",
   "text_color",
+  "background_id",
+  "bg_opacity",
   "font",
+  "font_id",
   "grain",
   "jitter",
   "bloom",
@@ -79,8 +83,35 @@ const LOOK_KEYS = [
   "chromatic",
   "trail",
   "reactivity",
+  "text_position",
   "text_y",
+  "text_size",
+  "text_opacity",
+  "text_glow",
+  "text_glitch",
+  "text_chroma",
+  "text_jitter",
+  "logo_position",
+  "logo_size",
+  "logo_opacity",
+  "logo_glow",
+  "logo_glitch",
+  "logo_chroma",
+  "logo_jitter",
 ];
+const OUTPUT_KEYS = ["format", "quality", "fps"];
+
+function lookOf(settings) {
+  const out = {};
+  for (const k of LOOK_KEYS) if (settings[k] !== undefined) out[k] = settings[k];
+  return out;
+}
+
+function stripOutput(settings) {
+  if (!settings) return settings;
+  for (const k of OUTPUT_KEYS) delete settings[k];
+  return settings;
+}
 
 const audioEl = new Audio();
 audioEl.preload = "auto";
@@ -137,6 +168,8 @@ function saveSession() {
       SESSION_KEY,
       JSON.stringify({
         track_id: state.track?.id || "",
+        job_id: state.job?.id || "",
+        output: state.output,
         settings: state.settings,
         clips: wave.clips.map((c) => ({
           id: c.id,
@@ -181,18 +214,13 @@ function storeUserLooks(list) {
 function applyLook(look) {
   const bundled = Boolean(look.bundled);
   const src = look.settings || look;
-  const text = state.settings.text;
-  const sub = state.settings.subtext;
-  if (bundled) {
-    for (const k of LOOK_KEYS) {
-      if (src[k] !== undefined) state.settings[k] = src[k];
-    }
-    state.settings.font_id = "";
-    state.settings.text = text;
-    state.settings.subtext = sub;
-  } else {
-    Object.assign(state.settings, src);
+  for (const k of LOOK_KEYS) {
+    if (src[k] !== undefined) state.settings[k] = src[k];
   }
+  // bundled looks name a bundled font; a lingering custom upload must not win
+  if (bundled) state.settings.font_id = "";
+  state.bgName = state.bgNames[state.settings.background_id] || (state.settings.background_id ? "custom image" : "");
+  state.fontName = state.fontNames[state.settings.font_id] || (state.settings.font_id ? "custom font" : "");
   afterLookChange();
   loadPreviewBg(state.settings.background_id);
   loadPreviewLogo(state.settings.logo_id);
@@ -328,7 +356,7 @@ function loadClipSettings(id) {
     return;
   }
   if (!c.settings) c.settings = { ...state.settings };
-  else Object.assign(state.settings, c.settings);
+  else Object.assign(state.settings, stripOutput(c.settings));
   state.bgName = state.bgNames[state.settings.background_id] || (state.settings.background_id ? "custom image" : "");
   state.fontName = state.fontNames[state.settings.font_id] || (state.settings.font_id ? "custom font" : "");
   state.logoName = state.logoNames[state.settings.logo_id] || (state.settings.logo_id ? "logo" : "");
@@ -464,18 +492,18 @@ function syncControls() {
     afterLookChange();
     syncControls();
   });
-  seg($("formats"), c.formats, s.format, (id) => {
-    s.format = id;
+  seg($("formats"), c.formats, state.output.format, (id) => {
+    state.output.format = id;
     $("stage").dataset.format = id;
     const f = c.formats.find((x) => x.id === id);
     $("format-tag").textContent = f?.ratio || id;
-    preview.draw();
-    afterLookChange();
+    preview.setFormat(id);
+    scheduleSave();
     syncControls();
   });
-  seg($("qualities"), c.qualities, s.quality, (id) => {
-    s.quality = id;
-    afterLookChange();
+  seg($("qualities"), c.qualities, state.output.quality, (id) => {
+    state.output.quality = id;
+    scheduleSave();
     syncControls();
   });
   paintSliderGroup("sliders", c.sliders);
@@ -492,8 +520,11 @@ function syncControls() {
   const safe = $("safe-area");
   if (safe) safe.checked = Boolean(state.safeArea);
   preview.setSafeArea(Boolean(state.safeArea));
+  preview.setFormat(state.output.format);
   preview.setSettings({ ...s });
-  $("stage").dataset.format = s.format;
+  $("stage").dataset.format = state.output.format;
+  const fmtMeta = (c.formats || []).find((x) => x.id === state.output.format);
+  if ($("format-tag")) $("format-tag").textContent = fmtMeta?.ratio || state.output.format;
   const hasBg = Boolean(s.background_id);
   $("bg-clear").hidden = !hasBg;
   $("bg-name").textContent = hasBg ? state.bgName || "custom image" : "";
@@ -873,17 +904,21 @@ $("render").addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         track_id: state.track.id,
+        format: state.output.format,
+        quality: state.output.quality,
+        fps: state.output.fps,
         clips: wave.clips.map((c) => ({
           start: c.start,
           end: c.end,
           fade_in: c.fade_in || 0,
           fade_out: c.fade_out || 0,
-          settings: c.settings || state.settings,
+          settings: stripOutput({ ...(c.settings || state.settings) }),
         })),
-        settings: state.settings,
+        settings: stripOutput({ ...state.settings }),
       }),
     });
     state.job = job;
+    scheduleSave();
     pollJob(job.id);
   } catch (err) {
     $("render").disabled = false;
@@ -922,6 +957,7 @@ function pollJob(id) {
         clearInterval(state.poll);
         $("render").disabled = false;
         $("cancel").hidden = true;
+        loadRecent();
         if (job.status === "error") toast(job.error || "Render failed");
         if (job.status === "done") $("job-pill").className = "pill done";
         if (job.status !== "done") $("job-pill").className = "pill";
@@ -936,6 +972,44 @@ function pollJob(id) {
   state.poll = setInterval(tickJob, 600);
 }
 
+function jobLabel(job) {
+  const when = job.created ? new Date(job.created * 1000) : null;
+  const stamp = when
+    ? `${when.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${when.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`
+    : "";
+  const src = job.track_name || job.track_id || "";
+  return `${stamp} · ${src} · ${job.format || ""}/${job.quality || ""}`;
+}
+
+async function loadRecent() {
+  const box = $("recent");
+  if (!box) return;
+  try {
+    const res = await api("/api/jobs?limit=8");
+    const jobs = (res.jobs || []).filter((j) => j.outputs?.length || j.status === "error");
+    box.innerHTML = "";
+    if (!jobs.length) {
+      box.innerHTML = `<span class="faint">no renders yet</span>`;
+      return;
+    }
+    for (const job of jobs) {
+      const head = document.createElement("div");
+      head.className = "recent-head";
+      head.textContent = jobLabel(job) + (job.status === "error" ? " · failed" : "");
+      box.appendChild(head);
+      for (const o of job.outputs || []) {
+        const a = document.createElement("a");
+        a.href = `/api/jobs/${job.id}/files/${encodeURIComponent(o.name)}`;
+        a.download = o.name;
+        a.textContent = `${o.name} · ${formatTime(o.start)}–${formatTime(o.end)} · ${(o.bytes / 1e6).toFixed(1)} MB`;
+        box.appendChild(a);
+      }
+    }
+  } catch {
+    /* offline or old server */
+  }
+}
+
 async function restoreSession() {
   let ses;
   try {
@@ -945,6 +1019,13 @@ async function restoreSession() {
   }
   if (!ses) return;
   if (ses.settings) Object.assign(state.settings, ses.settings);
+  // sessions saved before output moved to the job carry format inside settings
+  for (const k of OUTPUT_KEYS) {
+    if (ses.settings?.[k] !== undefined && !ses.output) state.output[k] = ses.settings[k];
+  }
+  if (ses.output) Object.assign(state.output, ses.output);
+  stripOutput(state.settings);
+  for (const c of ses.clips || []) stripOutput(c.settings);
   state.safeArea = Boolean(ses.safeArea);
   state.bgNames = ses.bgNames || {};
   state.fontNames = ses.fontNames || {};
@@ -953,9 +1034,21 @@ async function restoreSession() {
     try {
       const meta = await api(`/api/tracks/${ses.track_id}`);
       await loadTrack(meta, { clips: ses.clips, selected: ses.selected });
-      return;
     } catch {
       /* track expired on disk */
+    }
+  }
+  if (ses.job_id) {
+    try {
+      const job = await api(`/api/jobs/${ses.job_id}`);
+      if (job.status === "queued" || job.status === "running") {
+        state.job = job;
+        $("render").disabled = true;
+        $("cancel").hidden = false;
+        pollJob(job.id);
+      }
+    } catch {
+      /* job gone */
     }
   }
 }
@@ -974,6 +1067,7 @@ async function boot() {
   syncControls();
   preview.setSettings(state.settings);
   preview.start();
+  loadRecent();
 }
 
 $("look-save")?.addEventListener("click", () => {
@@ -988,7 +1082,7 @@ $("look-save")?.addEventListener("click", () => {
     id: existing?.id || `u-${Date.now().toString(16)}`,
     label,
     bundled: false,
-    settings: { ...state.settings },
+    settings: lookOf(state.settings),
   };
   const next = existing ? list.map((l) => (l.id === existing.id ? entry : l)) : [...list, entry];
   storeUserLooks(next);

@@ -70,9 +70,6 @@ def test_font_and_logo_on_frame(client, wav_path, tmp_path: Path):
         track = client.post("/api/tracks", files={"file": ("song.wav", f, "audio/wav")}).json()
     settings = VisualSettings(
         scene="oscilloscope",
-        format="square",
-        quality="draft",
-        fps=24,
         text="FOG MARGINS",
         subtext="Rope",
         font="custom",
@@ -85,6 +82,9 @@ def test_font_and_logo_on_frame(client, wav_path, tmp_path: Path):
         "/api/jobs",
         json={
             "track_id": track["id"],
+            "format": "square",
+            "quality": "draft",
+            "fps": 24,
             "clips": [{"start": 0.5, "end": 1.2, "settings": settings.model_dump()}],
             "settings": settings.model_dump(),
         },
@@ -118,8 +118,6 @@ def test_engine_draws_text_and_logo(wav_path, tmp_path: Path):
     logo = Image.new("RGBA", (40, 20), (0, 255, 180, 255))
     settings = VisualSettings(
         scene="bars",
-        format="square",
-        quality="draft",
         text="FOG MARGINS",
         font="bebas",
         logo_position="top-right",
@@ -138,8 +136,6 @@ def test_text_and_logo_fx_change_pixels(wav_path):
     logo = Image.new("RGBA", (48, 24), (0, 255, 180, 255))
     base = dict(
         scene="bars",
-        format="square",
-        quality="draft",
         text="FOG MARGINS",
         subtext="Rope",
         font="archivo",

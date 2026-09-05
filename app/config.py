@@ -11,6 +11,8 @@ class AppConfig(BaseSettings):
     port: int = 8080
     max_upload_mb: int = 200
     ffmpeg: str = "ffmpeg"
+    # Tracks and renders untouched for this many days are deleted. 0 disables.
+    retention_days: int = 30
 
     @property
     def tracks_dir(self) -> Path:

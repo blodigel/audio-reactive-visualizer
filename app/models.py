@@ -57,9 +57,6 @@ class VisualSettings(BaseModel):
     logo_chroma: float = Field(default=0.0, ge=0, le=1)
     logo_jitter: float = Field(default=0.0, ge=0, le=1)
     bg_opacity: float = Field(default=0.22, ge=0, le=1)
-    format: FormatId = "reels"
-    quality: QualityId = "standard"
-    fps: int = Field(default=30, ge=12, le=60)
     grain: float = Field(default=0.45, ge=0, le=1)
     jitter: float = Field(default=0.30, ge=0, le=1)
     bloom: float = Field(default=0.25, ge=0, le=1)
@@ -135,9 +132,14 @@ class SuggestIn(BaseModel):
 
 
 class RenderRequest(BaseModel):
+    """One render job. Output format/quality/fps belong to the job; look belongs to each clip."""
+
     track_id: str
     clips: list[ClipIn] = Field(min_length=1, max_length=8)
     settings: VisualSettings = Field(default_factory=VisualSettings)
+    format: FormatId = "reels"
+    quality: QualityId = "standard"
+    fps: int = Field(default=30, ge=12, le=60)
 
 
 class ClipOut(BaseModel):
@@ -174,5 +176,9 @@ class JobOut(BaseModel):
     progress: float
     message: str
     track_id: str
+    track_name: str = ""
+    format: FormatId = "reels"
+    quality: QualityId = "standard"
+    created: float = 0.0
     outputs: list[JobFileOut] = Field(default_factory=list)
     error: str | None = None

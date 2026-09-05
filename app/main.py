@@ -22,6 +22,7 @@ from app.jobs import manager
 from app.logos import ALLOWED_LOGO_EXT, LogoError, save_logo
 from app.models import RenderRequest, SuggestIn
 from app.presets import public_catalog
+from app.storage import prune_old
 import numpy as np
 
 log = logging.getLogger("noiseviz")
@@ -51,7 +52,11 @@ def create_app() -> FastAPI:
     mimetypes.add_type("font/ttf", ".ttf")
     mimetypes.add_type("font/otf", ".otf")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    app = FastAPI(title="NOISE/VIZ", version="1.0.0")
+    try:
+        prune_old()
+    except Exception:
+        log.exception("startup prune failed")
+    app = FastAPI(title="NOISE/VIZ", version="1.1.0")
 
     @app.get("/api/health")
     def health() -> dict:
@@ -309,6 +314,11 @@ def create_app() -> FastAPI:
                 raise HTTPException(400, "A clip extends past the end of the track")
         job = manager.submit(track_id, wav, body)
         return manager.public(job).model_dump()
+
+    @app.get("/api/jobs")
+    def list_jobs(limit: int = 20) -> dict:
+        limit = max(1, min(limit, 100))
+        return {"jobs": [manager.public(j).model_dump() for j in manager.recent(limit)]}
 
     @app.get("/api/jobs/{job_id}")
     def get_job(job_id: str) -> dict:

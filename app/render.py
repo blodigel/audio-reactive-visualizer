@@ -7,11 +7,12 @@ import threading
 from pathlib import Path
 from typing import Callable
 
+import cv2
 import numpy as np
 
 from app.audio import load_wav, spectral_features, mono
 from app.config import config
-from app.models import VisualSettings
+from app.models import FormatId, QualityId, VisualSettings
 from app.backgrounds import load_cover
 from app.logos import load_logo
 from app.presets import QUALITY_CRF, QUALITY_PRESET, output_size
@@ -31,6 +32,18 @@ def _ffmpeg_bin() -> str:
     if not path:
         raise RenderError("ffmpeg not found on PATH. Install ffmpeg or set FFMPEG=/path/to/ffmpeg")
     return path
+
+
+def _stop(proc: subprocess.Popen) -> None:
+    """Kill ffmpeg and reap it so a cancelled render leaves no zombie."""
+    try:
+        proc.kill()
+    except Exception:
+        pass
+    try:
+        proc.wait(timeout=5)
+    except Exception:
+        pass
 
 
 def clamp_fades(duration: float, fade_in: float, fade_out: float) -> tuple[float, float]:
@@ -64,6 +77,9 @@ def render_clip(
     should_cancel: Callable[[], bool] | None = None,
     fade_in: float = 0.0,
     fade_out: float = 0.0,
+    fmt: FormatId = "reels",
+    quality: QualityId = "standard",
+    fps: int = 30,
 ) -> dict:
     data, sr = load_wav(wav_path)
     duration = max(0.5, end - start)
@@ -72,8 +88,8 @@ def render_clip(
         raise RenderError("Clip start is past the end of the track")
     end = min(end, track_dur)
     duration = end - start
-    fps = int(settings.fps)
-    w, h = output_size(settings.format, settings.quality)
+    fps = int(fps)
+    w, h = output_size(fmt, quality)
     spec = spectral_features(mono(data), sr, fps=fps)
     bg = load_cover(settings.background_id, w, h)
     logo = load_logo(settings.logo_id)
@@ -83,8 +99,8 @@ def render_clip(
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     ffmpeg = _ffmpeg_bin()
-    crf = QUALITY_CRF.get(settings.quality, 19)
-    preset = QUALITY_PRESET.get(settings.quality, "veryfast")
+    crf = QUALITY_CRF.get(quality, 19)
+    preset = QUALITY_PRESET.get(quality, "veryfast")
     af = []
     if fade_in > 1e-4:
         af.append(f"afade=t=in:st=0:d={fade_in:.4f}")
@@ -161,11 +177,11 @@ def render_clip(
     try:
         for i in range(n_frames):
             if should_cancel and should_cancel():
-                proc.kill()
+                _stop(proc)
                 raise RenderError("Cancelled")
             frame = engine.render_frame(i, fps)
             if frame.shape != (h, w, 3):
-                frame = np.resize(frame, (h, w, 3))
+                frame = cv2.resize(frame, (w, h), interpolation=cv2.INTER_LINEAR)
             if fade_in > 1e-4 or fade_out > 1e-4:
                 t = i / float(fps)
                 g = fade_gain(t, duration, fade_in, fade_out)
@@ -176,7 +192,7 @@ def render_clip(
                 on_progress((i + 1) / n_frames, f"frame {i + 1}/{n_frames}")
         proc.stdin.close()
     except BrokenPipeError as exc:
-        proc.kill()
+        _stop(proc)
         drainer.join(timeout=2)
         err = b"".join(err_chunks).decode("utf-8", "replace")
         raise RenderError(f"ffmpeg pipe broke: {err or exc}") from exc
@@ -187,7 +203,7 @@ def render_clip(
             pass
         raise
     except Exception:
-        proc.kill()
+        _stop(proc)
         raise
 
     code = proc.wait(timeout=120)

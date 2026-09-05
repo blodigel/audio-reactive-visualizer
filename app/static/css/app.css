@@ -579,3 +579,14 @@ button { cursor: pointer; }
     max-height: min(240px, 32vh);
   }
 }
+
+.recent-label { margin-top: 10px; }
+.recent { max-height: 180px; overflow-y: auto; }
+.recent-head {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--faint);
+  margin-top: 6px;
+  text-transform: none;
+}
+.recent .faint { color: var(--faint); font-family: var(--mono); font-size: 11px; }

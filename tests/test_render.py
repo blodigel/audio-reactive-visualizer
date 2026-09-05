@@ -16,9 +16,6 @@ def test_engine_all_scenes(wav_path):
             bg_color="#050303",
             effect_color="#d63d24",
             text_color="#ede6dc",
-            format="square",
-            quality="draft",
-            fps=24,
         )
         engine = VisualEngine(data, sr, spec, settings, 80, 80, 1.0)
         frame = engine.render_frame(0, 24)
@@ -34,16 +31,13 @@ def test_render_tiny_mp4(wav_path, tmp_path):
         bg_color="#050303",
         effect_color="#d63d24",
         text_color="#ede6dc",
-        format="square",
-        quality="draft",
-        fps=24,
         text="FOG MARGINS",
         subtext="Rope",
         grain=0.4,
         jitter=0.2,
         glitch=0.3,
     )
-    info = render_clip(wav_path, out, start=1.0, end=1.6, settings=settings)
+    info = render_clip(wav_path, out, start=1.0, end=1.6, settings=settings, fmt="square", quality="draft", fps=24)
     assert out.is_file()
     assert out.stat().st_size > 2000
     assert info["frames"] >= 10
@@ -68,9 +62,6 @@ def test_render_with_fades(wav_path, tmp_path):
     out = tmp_path / "fade.mp4"
     settings = VisualSettings(
         scene="oscilloscope",
-        format="square",
-        quality="draft",
-        fps=24,
     )
     info = render_clip(
         wav_path,
@@ -80,6 +71,9 @@ def test_render_with_fades(wav_path, tmp_path):
         settings=settings,
         fade_in=0.35,
         fade_out=0.2,
+        fmt="square",
+        quality="draft",
+        fps=24,
     )
     assert out.is_file()
     assert out.stat().st_size > 2000

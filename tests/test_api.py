@@ -93,3 +93,74 @@ def test_demo_track(client):
     assert meta["duration"] > 10
     assert meta["suggestions"]
     assert client.get(f"/api/tracks/{meta['id']}/audio").status_code == 200
+
+
+def test_jobs_list_and_persist(client, wav_path, tmp_path):
+    from app.jobs import JobManager
+    from app.config import config
+
+    with wav_path.open("rb") as f:
+        r = client.post("/api/tracks", files={"file": ("song.wav", f, "audio/wav")})
+    tid = r.json()["id"]
+    body = {
+        "track_id": tid,
+        "format": "square",
+        "quality": "draft",
+        "fps": 12,
+        "clips": [{"start": 1.0, "end": 1.6, "settings": {"scene": "bars", "text": "FOG MARGINS"}}],
+    }
+    r = client.post("/api/jobs", json=body)
+    assert r.status_code == 200, r.text
+    job = r.json()
+    assert job["format"] == "square" and job["quality"] == "draft"
+    r = client.get("/api/jobs")
+    assert r.status_code == 200
+    ids = [j["id"] for j in r.json()["jobs"]]
+    assert job["id"] in ids
+    # job.json is on disk right after submit
+    assert (config.jobs_dir / job["id"] / "job.json").is_file()
+    # a fresh manager (simulating a restart) sees the job and flags an unfinished one
+    fresh = JobManager(start_worker=False)
+    loaded = fresh.get(job["id"])
+    assert loaded is not None
+    assert loaded.status in ("done", "error", "running", "cancelled") or loaded.status == "error"
+    if loaded.status == "error":
+        assert loaded.error == "Interrupted by restart"
+
+
+def test_render_request_ignores_format_inside_settings():
+    from app.models import RenderRequest
+
+    req = RenderRequest(
+        track_id="a" * 12,
+        clips=[{"start": 0, "end": 2, "settings": {"format": "square", "quality": "high"}}],
+        settings={"format": "landscape"},
+    )
+    assert req.format == "reels"
+    assert req.quality == "standard"
+    assert not hasattr(req.clips[0].settings, "format")
+
+
+def test_prune_old(tmp_path, monkeypatch):
+    import os
+    import time
+
+    from app.config import config
+    from app.storage import prune_old
+
+    monkeypatch.setattr(config, "data_dir", tmp_path / "data")
+    config.ensure_dirs()
+    old = config.tracks_dir / ("a" * 12)
+    new = config.tracks_dir / ("b" * 12)
+    old.mkdir()
+    new.mkdir()
+    (old / "meta.json").write_text("{}")
+    (new / "meta.json").write_text("{}")
+    stale = time.time() - 40 * 86400
+    os.utime(old, (stale, stale))
+    os.utime(old / "meta.json", (stale, stale))
+    removed = prune_old(retention_days=30)
+    assert old in removed
+    assert not old.exists()
+    assert new.exists()
+    assert prune_old(retention_days=0) == []

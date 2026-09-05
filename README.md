@@ -18,7 +18,7 @@ Runs locally in Docker. Nothing is uploaded to a third party.
 4. Pick **background, effect and text colors** (or a palette swatch). Optionally **import a background image** (AI still, photo, PNG/JPEG/WebP) and set **BG tint** (how hard the background color washes over it). Then ride **grain, jitter, glitch, bloom, scanlines, chroma, trail, reactivity**.
 5. Add **title / subtext** on the frame. Pick a **font** (Archivo, Bebas, metal, glitch, …) or **upload a TTF/OTF**. Optionally **upload a logo** (PNG with transparency) and place it above the text or in a corner. Text and logo have their own **glow / glitch / chroma / jitter**.
 6. Live preview in the browser (reacts to the audio).
-7. **Render** H.264 + AAC MP4s sized for Reels / Shorts, square, 4:5, or landscape.
+7. **Render** H.264 + AAC MP4s sized for Reels / Shorts, square, 4:5, or landscape. Format and quality belong to the render job, so every clip in a batch comes out the same size. Finished renders stay listed under **Recent renders** across restarts.
 
 Default look is crushed blacks, analog snow, rust and bone. Colors are free: rust, ice, blood, acid, or anything from the pickers.
 
@@ -30,7 +30,7 @@ docker compose up --build
 
 Open [http://localhost:8080](http://localhost:8080).
 
-Use **Load demo tape** if you just want to see a look without a file. Uploads and renders persist in the `viz-data` volume.
+Use **Load demo tape** if you just want to see a look without a file. Uploads and renders persist in the `viz-data` volume. Tracks and renders untouched for 30 days are pruned; set `RETENTION_DAYS=0` to keep everything, or another number of days.
 
 Or pull the GHCR image (after the first successful Actions run):
 
