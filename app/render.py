@@ -33,6 +33,27 @@ def _ffmpeg_bin() -> str:
     return path
 
 
+def clamp_fades(duration: float, fade_in: float, fade_out: float) -> tuple[float, float]:
+    duration = max(0.0, float(duration))
+    fade_in = float(np.clip(fade_in, 0.0, duration))
+    fade_out = float(np.clip(fade_out, 0.0, duration))
+    return fade_in, fade_out
+
+
+def fade_gain(t: float, duration: float, fade_in: float, fade_out: float) -> float:
+    """0–1 envelope: fade in at start, fade out at end, independent (may overlap)."""
+    if duration <= 0:
+        return 0.0
+    g = 1.0
+    fade_in, fade_out = clamp_fades(duration, fade_in, fade_out)
+    if fade_in > 1e-4 and t < fade_in:
+        g *= max(0.0, t / fade_in)
+    remaining = duration - t
+    if fade_out > 1e-4 and remaining < fade_out:
+        g *= max(0.0, remaining / fade_out)
+    return float(np.clip(g, 0.0, 1.0))
+
+
 def render_clip(
     wav_path: Path,
     out_path: Path,
@@ -41,6 +62,8 @@ def render_clip(
     settings: VisualSettings,
     on_progress: ProgressFn | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    fade_in: float = 0.0,
+    fade_out: float = 0.0,
 ) -> dict:
     data, sr = load_wav(wav_path)
     duration = max(0.5, end - start)
@@ -56,11 +79,17 @@ def render_clip(
     logo = load_logo(settings.logo_id)
     engine = VisualEngine(data, sr, spec, settings, w, h, start, background=bg, logo=logo)
     n_frames = max(1, int(round(duration * fps)))
+    fade_in, fade_out = clamp_fades(duration, fade_in, fade_out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     ffmpeg = _ffmpeg_bin()
     crf = QUALITY_CRF.get(settings.quality, 19)
     preset = QUALITY_PRESET.get(settings.quality, "veryfast")
+    af = []
+    if fade_in > 1e-4:
+        af.append(f"afade=t=in:st=0:d={fade_in:.4f}")
+    if fade_out > 1e-4:
+        af.append(f"afade=t=out:st={max(0.0, duration - fade_out):.4f}:d={fade_out:.4f}")
     cmd = [
         ffmpeg,
         "-hide_banner",
@@ -104,8 +133,10 @@ def render_clip(
         "-shortest",
         "-movflags",
         "+faststart",
-        str(out_path),
     ]
+    if af:
+        cmd.extend(["-af", ",".join(af)])
+    cmd.append(str(out_path))
     log.info("ffmpeg %s", " ".join(cmd))
     proc = subprocess.Popen(
         cmd,
@@ -135,6 +166,11 @@ def render_clip(
             frame = engine.render_frame(i, fps)
             if frame.shape != (h, w, 3):
                 frame = np.resize(frame, (h, w, 3))
+            if fade_in > 1e-4 or fade_out > 1e-4:
+                t = i / float(fps)
+                g = fade_gain(t, duration, fade_in, fade_out)
+                if g < 0.999:
+                    frame = np.clip(frame.astype(np.float32) * g, 0, 255).astype(np.uint8)
             proc.stdin.write(np.ascontiguousarray(frame).tobytes())
             if on_progress and (i % 5 == 0 or i == n_frames - 1):
                 on_progress((i + 1) / n_frames, f"frame {i + 1}/{n_frames}")

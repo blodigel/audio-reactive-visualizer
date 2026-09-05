@@ -52,6 +52,10 @@ class VisualSettings(BaseModel):
     logo_position: LogoPosition = "above-text"
     logo_size: float = Field(default=0.18, ge=0.06, le=0.55)
     logo_opacity: float = Field(default=1.0, ge=0, le=1)
+    logo_glow: float = Field(default=0.0, ge=0, le=1)
+    logo_glitch: float = Field(default=0.0, ge=0, le=1)
+    logo_chroma: float = Field(default=0.0, ge=0, le=1)
+    logo_jitter: float = Field(default=0.0, ge=0, le=1)
     bg_opacity: float = Field(default=0.22, ge=0, le=1)
     format: FormatId = "reels"
     quality: QualityId = "standard"
@@ -71,6 +75,10 @@ class VisualSettings(BaseModel):
     text_position: TextPosition = "lower"
     text_size: float = Field(default=0.65, ge=0.2, le=1.5)
     text_opacity: float = Field(default=0.92, ge=0, le=1)
+    text_glow: float = Field(default=0.0, ge=0, le=1)
+    text_glitch: float = Field(default=0.0, ge=0, le=1)
+    text_chroma: float = Field(default=0.0, ge=0, le=1)
+    text_jitter: float = Field(default=0.0, ge=0, le=1)
     seed: int = Field(default=1, ge=0, le=1_000_000)
 
     @field_validator("text", "subtext")
@@ -105,6 +113,8 @@ class VisualSettings(BaseModel):
 class ClipIn(BaseModel):
     start: float = Field(ge=0)
     end: float = Field(gt=0)
+    fade_in: float = Field(default=0.0, ge=0, le=30)
+    fade_out: float = Field(default=0.0, ge=0, le=30)
     settings: VisualSettings | None = None
 
     @model_validator(mode="after")

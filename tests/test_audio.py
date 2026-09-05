@@ -1,4 +1,8 @@
-from app.audio import analyze_file, load_wav, mono, waveform_peaks, rms_envelope
+from pathlib import Path
+import shutil
+import subprocess
+
+from app.audio import analyze_file, ingest_audio, load_wav, mono, waveform_peaks, rms_envelope
 
 
 def test_load_and_duration(wav_path):
@@ -27,3 +31,17 @@ def test_peaks_and_envelope(wav_path):
     times, rms = rms_envelope(m, sr)
     assert times.shape == rms.shape
     assert rms.max() > 0
+
+
+def test_ingest_mp3_to_wav(wav_path, tmp_path: Path):
+    ffmpeg = shutil.which("ffmpeg")
+    assert ffmpeg
+    mp3 = tmp_path / "t.mp3"
+    subprocess.check_call(
+        [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(wav_path), "-c:a", "libmp3lame", "-q:a", "7", str(mp3)]
+    )
+    dest = tmp_path / "source.wav"
+    ingest_audio(mp3, dest)
+    data, sr = load_wav(dest)
+    assert data.shape[1] == 2
+    assert abs(data.shape[0] / sr - 8.0) < 0.2

@@ -74,7 +74,7 @@ export class Waveform {
       end = dur;
       start = Math.max(0, end - len);
     }
-    const clip = { id: uid(), start, end, reason: "manual" };
+    const clip = { id: uid(), start, end, reason: "manual", fade_in: 0, fade_out: 0 };
     this.clips = [...this.clips, clip];
     this.selected = clip.id;
     this._emit();
@@ -87,6 +87,8 @@ export class Waveform {
       end: s.end,
       reason: s.reason || "",
       score: s.score,
+      fade_in: 0,
+      fade_out: 0,
     }));
     this.selected = this.clips[0]?.id || null;
     this._emit();
@@ -167,7 +169,7 @@ export class Waveform {
       const a = Math.min(this.drag.origin, t);
       const b = Math.max(this.drag.origin, t);
       if (!this.drag.id) {
-        const clip = { id: uid(), start: a, end: Math.max(a + 0.5, b), reason: "manual" };
+        const clip = { id: uid(), start: a, end: Math.max(a + 0.5, b), reason: "manual", fade_in: 0, fade_out: 0 };
         this.drag.id = clip.id;
         this.clips = [...this.clips, clip];
         this.selected = clip.id;
@@ -262,6 +264,25 @@ export class Waveform {
       ctx.fillStyle = on ? "#e8c9a8" : "rgba(237, 230, 220, 0.35)";
       ctx.fillRect(x1, 0, hw, h);
       ctx.fillRect(x2 - hw, 0, hw, h);
+      const len = Math.max(0.001, clip.end - clip.start);
+      const fi = Math.min(clip.fade_in || 0, len);
+      const fo = Math.min(clip.fade_out || 0, len);
+      if (fi > 0.02) {
+        const fw = (fi / dur) * w;
+        const g = ctx.createLinearGradient(x1, 0, x1 + fw, 0);
+        g.addColorStop(0, "rgba(0,0,0,0.62)");
+        g.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = g;
+        ctx.fillRect(x1, 0, fw, h);
+      }
+      if (fo > 0.02) {
+        const fw = (fo / dur) * w;
+        const g = ctx.createLinearGradient(x2 - fw, 0, x2, 0);
+        g.addColorStop(0, "rgba(0,0,0,0)");
+        g.addColorStop(1, "rgba(0,0,0,0.62)");
+        ctx.fillStyle = g;
+        ctx.fillRect(x2 - fw, 0, fw, h);
+      }
     }
 
     const px = (this.playhead / dur) * w;

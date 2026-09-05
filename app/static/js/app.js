@@ -1,6 +1,6 @@
-import { api, uploadWav } from "./api.js?v=10";
-import { Preview } from "./preview.js?v=10";
-import { Waveform, formatTime } from "./waveform.js?v=10";
+import { api, uploadWav } from "./api.js?v=15";
+import { Preview } from "./preview.js?v=15";
+import { Waveform, formatTime } from "./waveform.js?v=15";
 
 const $ = (id) => document.getElementById(id);
 
@@ -19,6 +19,10 @@ const state = {
     logo_position: "above-text",
     logo_size: 0.18,
     logo_opacity: 1,
+    logo_glow: 0,
+    logo_glitch: 0,
+    logo_chroma: 0,
+    logo_jitter: 0,
     bg_opacity: 0.22,
     format: "reels",
     quality: "standard",
@@ -38,6 +42,10 @@ const state = {
     text_position: "lower",
     text_size: 0.65,
     text_opacity: 0.92,
+    text_glow: 0,
+    text_glitch: 0,
+    text_chroma: 0,
+    text_jitter: 0,
     seed: 1,
   },
   job: null,
@@ -66,6 +74,7 @@ const wave = new Waveform($("wave"), ({ clips, selected }) => {
   }
   renderClipList(clips, selected);
   updatePlayRange();
+  syncFadeControls();
 });
 
 function toast(msg) {
@@ -97,6 +106,38 @@ function persistClipSettings() {
   if (c) c.settings = { ...state.settings };
 }
 
+function paintSliderGroup(containerId, list) {
+  const box = $(containerId);
+  if (!box) return;
+  const s = state.settings;
+  box.innerHTML = "";
+  for (const sl of list || []) {
+    const wrap = document.createElement("div");
+    wrap.className = "slider";
+    wrap.innerHTML = `<label>${sl.label}</label><span class="val"></span>`;
+    const input = document.createElement("input");
+    input.type = "range";
+    input.min = "0";
+    input.max = "1";
+    input.step = "0.01";
+    input.value = String(s[sl.key] ?? 0);
+    input.title = sl.blurb || sl.label;
+    const val = wrap.querySelector(".val");
+    const paint = () => {
+      val.textContent = Number(input.value).toFixed(2);
+    };
+    paint();
+    input.addEventListener("input", () => {
+      s[sl.key] = Number(input.value);
+      paint();
+      persistClipSettings();
+      preview.setSettings({ ...state.settings });
+    });
+    wrap.appendChild(input);
+    box.appendChild(wrap);
+  }
+}
+
 function afterLookChange() {
   persistClipSettings();
   const label = $("clip-edit");
@@ -107,6 +148,44 @@ function afterLookChange() {
   }
   wave.draw();
   renderClipList(wave.clips, wave.selected);
+}
+
+function clipFadeGain(t, clip) {
+  if (!clip) return 1;
+  const dur = Math.max(0.001, clip.end - clip.start);
+  const local = t - clip.start;
+  let g = 1;
+  const fi = Math.min(clip.fade_in || 0, dur);
+  const fo = Math.min(clip.fade_out || 0, dur);
+  if (fi > 0.0005 && local < fi) g *= Math.max(0, local / fi);
+  if (fo > 0.0005 && dur - local < fo) g *= Math.max(0, (dur - local) / fo);
+  return Math.max(0, Math.min(1, g));
+}
+
+function syncFadeControls() {
+  const clip = wave.selectedClip();
+  const fi = $("fade-in");
+  const fo = $("fade-out");
+  if (!fi || !fo) return;
+  if (!clip) {
+    fi.disabled = true;
+    fo.disabled = true;
+    return;
+  }
+  fi.disabled = false;
+  fo.disabled = false;
+  const max = Math.min(8, Math.max(0, clip.end - clip.start));
+  fi.max = String(max);
+  fo.max = String(max);
+  const vin = Math.min(clip.fade_in || 0, max);
+  const vout = Math.min(clip.fade_out || 0, max);
+  clip.fade_in = vin;
+  clip.fade_out = vout;
+  fi.value = String(vin);
+  fo.value = String(vout);
+  $("fade-in-val").textContent = `${vin.toFixed(2)}s`;
+  $("fade-out-val").textContent = `${vout.toFixed(2)}s`;
+  preview.setClipFade(clip);
 }
 
 function loadClipSettings(id) {
@@ -128,6 +207,7 @@ function loadClipSettings(id) {
   loadPreviewBg(state.settings.background_id);
   loadPreviewLogo(state.settings.logo_id);
   if (state.settings.font_id) installCustomFont(state.settings.font_id, `/api/fonts/${state.settings.font_id}`);
+  syncFadeControls();
   syncControls();
 }
 
@@ -280,33 +360,9 @@ function syncControls() {
     }
   );
 
-  const box = $("sliders");
-  if (box) box.innerHTML = "";
-  for (const sl of c.sliders || []) {
-    const wrap = document.createElement("div");
-    wrap.className = "slider";
-    wrap.innerHTML = `<label>${sl.label}</label><span class="val"></span>`;
-    const input = document.createElement("input");
-    input.type = "range";
-    input.min = "0";
-    input.max = "1";
-    input.step = "0.01";
-    input.value = String(s[sl.key] ?? 0);
-    input.title = sl.blurb || sl.label;
-    const val = wrap.querySelector(".val");
-    const paint = () => {
-      val.textContent = Number(input.value).toFixed(2);
-    };
-    paint();
-    input.addEventListener("input", () => {
-      s[sl.key] = Number(input.value);
-      paint();
-      persistClipSettings();
-      preview.setSettings({ ...state.settings });
-    });
-    wrap.appendChild(input);
-    if (box) box.appendChild(wrap);
-  }
+  paintSliderGroup("sliders", c.sliders);
+  paintSliderGroup("text-fx", c.text_fx);
+  paintSliderGroup("logo-fx", c.logo_fx);
   $("text").value = s.text;
   $("subtext").value = s.subtext;
   $("text-size").value = String(s.text_size);
@@ -594,12 +650,30 @@ function tick() {
   wave.setPlayhead(t);
   const w = currentClipWindow();
   $("clock").textContent = `${formatTime(t)}  /  ${formatTime(w.end)}`;
+  const clip = wave.selectedClip();
+  audioEl.volume = clipFadeGain(t, clip);
+  preview.setClipFade(clip);
   if (!audioEl.paused && $("loop").checked && t >= w.end - 0.03) {
     audioEl.currentTime = w.start;
   }
   requestAnimationFrame(tick);
 }
 requestAnimationFrame(tick);
+
+function bindFadeSlider(id, key, valId) {
+  $(id).addEventListener("input", (e) => {
+    const clip = wave.selectedClip();
+    if (!clip) return;
+    const max = Math.min(8, Math.max(0, clip.end - clip.start));
+    const v = Math.min(max, Math.max(0, Number(e.target.value)));
+    clip[key] = v;
+    $(valId).textContent = `${v.toFixed(2)}s`;
+    preview.setClipFade(clip);
+    wave.draw();
+  });
+}
+bindFadeSlider("fade-in", "fade_in", "fade-in-val");
+bindFadeSlider("fade-out", "fade_out", "fade-out-val");
 
 $("text").addEventListener("input", (e) => {
   state.settings.text = e.target.value;
@@ -664,6 +738,8 @@ $("render").addEventListener("click", async () => {
         clips: wave.clips.map((c) => ({
           start: c.start,
           end: c.end,
+          fade_in: c.fade_in || 0,
+          fade_out: c.fade_out || 0,
           settings: c.settings || state.settings,
         })),
         settings: state.settings,

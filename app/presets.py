@@ -170,6 +170,20 @@ def public_catalog() -> dict[str, Any]:
             {"key": "trail", "label": "Trail", "blurb": "Phosphor persistence"},
             {"key": "reactivity", "label": "Reactivity", "blurb": "How tightly it follows the audio"},
         ],
+        "text_fx": [
+            {"key": "text_opacity", "label": "Opacity", "blurb": "Title / subtext fade"},
+            {"key": "text_glow", "label": "Glow", "blurb": "Bloom around the letters"},
+            {"key": "text_glitch", "label": "Glitch", "blurb": "Slice tears on the type"},
+            {"key": "text_chroma", "label": "Chroma", "blurb": "RGB split on the type"},
+            {"key": "text_jitter", "label": "Jitter", "blurb": "Shake the type"},
+        ],
+        "logo_fx": [
+            {"key": "logo_opacity", "label": "Opacity", "blurb": "Logo fade"},
+            {"key": "logo_glow", "label": "Glow", "blurb": "Bloom around the mark"},
+            {"key": "logo_glitch", "label": "Glitch", "blurb": "Slice tears on the logo"},
+            {"key": "logo_chroma", "label": "Chroma", "blurb": "RGB split on the logo"},
+            {"key": "logo_jitter", "label": "Jitter", "blurb": "Shake the logo"},
+        ],
         "fonts": public_fonts(),
         "logo_positions": [
             {"id": "above-text", "label": "Above text"},

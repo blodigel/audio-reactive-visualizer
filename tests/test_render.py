@@ -3,7 +3,7 @@ import numpy as np
 from app.audio import load_wav, mono, spectral_features
 from app.models import VisualSettings
 from app.presets import SCENE_META, resolved_scene
-from app.render import render_clip
+from app.render import clamp_fades, fade_gain, render_clip
 from app.viz import VisualEngine
 
 
@@ -44,6 +44,43 @@ def test_render_tiny_mp4(wav_path, tmp_path):
         glitch=0.3,
     )
     info = render_clip(wav_path, out, start=1.0, end=1.6, settings=settings)
+    assert out.is_file()
+    assert out.stat().st_size > 2000
+    assert info["frames"] >= 10
+
+
+def test_fade_gain_independent():
+    assert fade_gain(0.0, 4.0, 1.0, 0.0) == 0.0
+    assert abs(fade_gain(0.5, 4.0, 1.0, 0.0) - 0.5) < 1e-6
+    assert abs(fade_gain(1.0, 4.0, 1.0, 0.0) - 1.0) < 1e-6
+    assert abs(fade_gain(3.0, 4.0, 0.0, 1.0) - 1.0) < 1e-6
+    assert abs(fade_gain(3.5, 4.0, 0.0, 1.0) - 0.5) < 1e-6
+    assert fade_gain(4.0, 4.0, 0.0, 1.0) == 0.0
+    # both: start silent, mid full, end silent
+    assert fade_gain(0.0, 4.0, 1.0, 1.0) == 0.0
+    assert abs(fade_gain(2.0, 4.0, 1.0, 1.0) - 1.0) < 1e-6
+    assert fade_gain(4.0, 4.0, 1.0, 1.0) == 0.0
+    fi, fo = clamp_fades(2.0, 8.0, 8.0)
+    assert fi == 2.0 and fo == 2.0
+
+
+def test_render_with_fades(wav_path, tmp_path):
+    out = tmp_path / "fade.mp4"
+    settings = VisualSettings(
+        scene="oscilloscope",
+        format="square",
+        quality="draft",
+        fps=24,
+    )
+    info = render_clip(
+        wav_path,
+        out,
+        start=1.0,
+        end=2.2,
+        settings=settings,
+        fade_in=0.35,
+        fade_out=0.2,
+    )
     assert out.is_file()
     assert out.stat().st_size > 2000
     assert info["frames"] >= 10

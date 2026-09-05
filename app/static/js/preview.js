@@ -35,6 +35,11 @@ export class Preview {
     this.bctx = this.bloom.getContext("2d");
     this.chroma = document.createElement("canvas");
     this.cctx = this.chroma.getContext("2d");
+    this.overlay = document.createElement("canvas");
+    this.octx = this.overlay.getContext("2d");
+    this.overlayFx = document.createElement("canvas");
+    this.ofx = this.overlayFx.getContext("2d");
+    this.clipFade = null;
     this.particles = Array.from({ length: 120 }, () => ({
       x: Math.random(),
       y: Math.random(),
@@ -74,6 +79,19 @@ export class Preview {
     this.catalog = catalog || null;
   }
 
+  setClipFade(clip) {
+    if (!clip) {
+      this.clipFade = null;
+      return;
+    }
+    this.clipFade = {
+      start: clip.start,
+      end: clip.end,
+      fade_in: clip.fade_in || 0,
+      fade_out: clip.fade_out || 0,
+    };
+  }
+
   _lookSignature(s) {
     if (!s) return "";
     return [
@@ -88,10 +106,18 @@ export class Preview {
       s.logo_id,
       s.logo_position,
       s.logo_size,
+      s.logo_glow,
+      s.logo_glitch,
+      s.logo_chroma,
+      s.logo_jitter,
       s.text,
       s.subtext,
       s.text_position,
       s.text_size,
+      s.text_glow,
+      s.text_glitch,
+      s.text_chroma,
+      s.text_jitter,
     ].join("|");
   }
 
@@ -326,6 +352,23 @@ export class Preview {
     this._logo(ctx, w, h, s);
     this._text(ctx, w, h, pal);
 
+    const fade = this.clipFade;
+    if (fade) {
+      const t = this.audio?.currentTime ?? 0;
+      const dur = Math.max(0.001, fade.end - fade.start);
+      const local = t - fade.start;
+      let g = 1;
+      const fi = Math.min(fade.fade_in || 0, dur);
+      const fo = Math.min(fade.fade_out || 0, dur);
+      if (fi > 0.0005 && local < fi) g *= Math.max(0, local / fi);
+      if (fo > 0.0005 && dur - local < fo) g *= Math.max(0, (dur - local) / fo);
+      g = Math.max(0, Math.min(1, g));
+      if (g < 0.999) {
+        ctx.fillStyle = `rgba(0,0,0,${1 - g})`;
+        ctx.fillRect(0, 0, w, h);
+      }
+    }
+
     const jit = (s.jitter ?? 0.3) * (5 + b.bass * 12);
     this.canvas.style.transform = `translate(${(Math.random() - 0.5) * jit}px, ${(Math.random() - 0.5) * jit}px)`;
   }
@@ -531,25 +574,89 @@ export class Preview {
     }
   }
 
+  _prepOverlay(w, h) {
+    if (this.overlay.width !== w || this.overlay.height !== h) {
+      this.overlay.width = w;
+      this.overlay.height = h;
+      this.overlayFx.width = w;
+      this.overlayFx.height = h;
+    }
+    this.octx.clearRect(0, 0, w, h);
+    return this.octx;
+  }
+
+  _stampOverlay(ctx, w, h, fx) {
+    const glow = fx.glow ?? 0;
+    const glitch = fx.glitch ?? 0;
+    const chroma = fx.chroma ?? 0;
+    const jitter = fx.jitter ?? 0;
+    const opacity = fx.opacity ?? 1;
+    const src = this.overlay;
+    const dst = this.overlayFx;
+    const dx = this.ofx;
+    dx.clearRect(0, 0, w, h);
+    dx.drawImage(src, 0, 0);
+    if (glow > 0.02) {
+      dx.save();
+      dx.filter = `blur(${3 + glow * 14}px)`;
+      dx.globalCompositeOperation = "lighter";
+      dx.globalAlpha = 0.55 * glow;
+      dx.drawImage(src, 0, 0);
+      dx.restore();
+    }
+    if (glitch > 0.02) {
+      const slices = 1 + Math.floor(glitch * 9);
+      for (let i = 0; i < slices; i++) {
+        const y = Math.random() * h;
+        const hh = 2 + Math.random() * (4 + glitch * 22);
+        const shift = (Math.random() - 0.5) * w * 0.12 * glitch;
+        dx.drawImage(dst, 0, y, w, hh, shift, y, w, hh);
+      }
+    }
+    if (chroma > 0.02) {
+      const shift = 1 + chroma * 8;
+      dx.save();
+      dx.globalCompositeOperation = "screen";
+      dx.globalAlpha = 0.45 + 0.4 * chroma;
+      dx.drawImage(dst, -shift, 0);
+      dx.drawImage(dst, shift, 0);
+      dx.restore();
+    }
+    const jx = jitter > 0.02 ? (Math.random() - 0.5) * w * 0.04 * jitter : 0;
+    const jy = jitter > 0.02 ? (Math.random() - 0.5) * h * 0.03 * jitter : 0;
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    ctx.drawImage(dst, jx, jy);
+    ctx.restore();
+  }
+
   _text(ctx, w, h, pal) {
     const s = this.settings || {};
     if (!s.text && !s.subtext) return;
+    const ox = this._prepOverlay(w, h);
     const fam = this._fontFamily(s);
     const track = this._tracking(s);
-    ctx.textAlign = "center";
-    ctx.fillStyle = `rgba(${pal.accent[0]},${pal.accent[1]},${pal.accent[2]},${s.text_opacity ?? 0.9})`;
+    ox.textAlign = "center";
+    ox.fillStyle = `rgb(${pal.accent[0]},${pal.accent[1]},${pal.accent[2]})`;
     const size = (s.text_size ?? 0.65) * w * 0.06;
-    ctx.font = `600 ${size}px "${fam}", sans-serif`;
-    ctx.letterSpacing = `${track}em`;
+    ox.font = `600 ${size}px "${fam}", sans-serif`;
+    ox.letterSpacing = `${track}em`;
     let y = h * 0.72;
     if (s.text_position === "top") y = h * 0.12;
     if (s.text_position === "center") y = h * 0.5;
-    if (s.text) ctx.fillText(s.text, w / 2, y);
+    if (s.text) ox.fillText(s.text, w / 2, y);
     if (s.subtext) {
-      ctx.font = `400 ${size * 0.42}px "${fam}", sans-serif`;
-      ctx.fillStyle = `rgba(${pal.accent[0]},${pal.accent[1]},${pal.accent[2]},0.7)`;
-      ctx.fillText(s.subtext, w / 2, y + size * 0.7);
+      ox.font = `400 ${size * 0.42}px "${fam}", sans-serif`;
+      ox.fillStyle = `rgba(${pal.accent[0]},${pal.accent[1]},${pal.accent[2]},0.78)`;
+      ox.fillText(s.subtext, w / 2, y + size * 0.7);
     }
+    this._stampOverlay(ctx, w, h, {
+      glow: s.text_glow ?? 0,
+      glitch: s.text_glitch ?? 0,
+      chroma: s.text_chroma ?? 0,
+      jitter: s.text_jitter ?? 0,
+      opacity: s.text_opacity ?? 0.9,
+    });
   }
 
   _logo(ctx, w, h, s) {
@@ -580,10 +687,15 @@ export class Preview {
       else if (s.text_position === "center") y = Math.max(my, h * 0.4 - lh - h * 0.025);
       else y = Math.max(my, h * 0.68 - lh - h * 0.025);
     }
-    ctx.save();
-    ctx.globalAlpha = s.logo_opacity ?? 1;
-    ctx.drawImage(img, x, y, lw, lh);
-    ctx.restore();
+    const ox = this._prepOverlay(w, h);
+    ox.drawImage(img, x, y, lw, lh);
+    this._stampOverlay(ctx, w, h, {
+      glow: s.logo_glow ?? 0,
+      glitch: s.logo_glitch ?? 0,
+      chroma: s.logo_chroma ?? 0,
+      jitter: s.logo_jitter ?? 0,
+      opacity: s.logo_opacity ?? 1,
+    });
   }
 }
 

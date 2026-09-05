@@ -4,6 +4,7 @@ import json
 import logging
 import mimetypes
 import re
+import shutil
 import uuid
 from pathlib import Path
 
@@ -11,7 +12,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.audio import AudioError, analyze_file
+from app.audio import AUDIO_EXT, AudioError, analyze_file, ingest_audio
 from app.backgrounds import ALLOWED_EXT, BackgroundError, save_upload
 from app.clips import suggest_clips
 from app.config import config
@@ -63,17 +64,20 @@ def create_app() -> FastAPI:
     @app.post("/api/tracks")
     async def upload_track(file: UploadFile = File(...)) -> dict:
         name = file.filename or "upload.wav"
-        lower = name.lower()
-        if not (lower.endswith(".wav") or lower.endswith(".wave")):
-            raise HTTPException(400, "Please upload a WAV file")
+        ext = Path(name).suffix.lower()
+        if ext not in AUDIO_EXT:
+            raise HTTPException(
+                400, "Use WAV, MP3, FLAC, AIFF, M4A, AAC or OGG"
+            )
         track_id = uuid.uuid4().hex[:16]
         dest_dir = _track_dir(track_id)
         dest_dir.mkdir(parents=True, exist_ok=True)
+        raw = dest_dir / f"upload{ext}"
         dest = dest_dir / "source.wav"
         limit = config.max_upload_mb * 1024 * 1024
         written = 0
         try:
-            with dest.open("wb") as out:
+            with raw.open("wb") as out:
                 while True:
                     chunk = await file.read(1024 * 1024)
                     if not chunk:
@@ -85,19 +89,21 @@ def create_app() -> FastAPI:
                         )
                     out.write(chunk)
         except HTTPException:
-            dest.unlink(missing_ok=True)
-            dest_dir.rmdir()
+            shutil.rmtree(dest_dir, ignore_errors=True)
             raise
         finally:
             await file.close()
         if written < 64:
-            dest.unlink(missing_ok=True)
+            shutil.rmtree(dest_dir, ignore_errors=True)
             raise HTTPException(400, "File is empty")
         try:
+            ingest_audio(raw, dest)
             meta = analyze_file(dest, filename=name, track_id=track_id)
         except AudioError as exc:
-            dest.unlink(missing_ok=True)
+            shutil.rmtree(dest_dir, ignore_errors=True)
             raise HTTPException(400, str(exc)) from exc
+        if raw.resolve() != dest.resolve():
+            raw.unlink(missing_ok=True)
         (dest_dir / "meta.json").write_text(json.dumps(meta))
         return meta
 

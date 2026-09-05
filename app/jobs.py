@@ -127,6 +127,8 @@ class JobManager:
                     settings=clip_settings,
                     on_progress=on_progress,
                     should_cancel=should_cancel,
+                    fade_in=clip.fade_in,
+                    fade_out=clip.fade_out,
                 )
             except RenderError as exc:
                 if job.cancel:

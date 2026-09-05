@@ -15,6 +15,8 @@ def test_catalog_complete():
     assert any(s["id"] == "mixed" for s in cat["scenes"])
     assert any(f["id"] == "reels" for f in cat["formats"])
     assert "bg_color" in cat["defaults"]
+    assert any(s["key"] == "text_glitch" for s in cat["text_fx"])
+    assert any(s["key"] == "logo_glow" for s in cat["logo_fx"])
 
 
 def test_hex_and_palette():
@@ -52,3 +54,6 @@ def test_clip_owns_settings():
     assert clip.settings.text == "A"
     plain = ClipIn(start=0.0, end=2.0)
     assert plain.settings is None
+    faded = ClipIn(start=1.0, end=5.0, fade_in=0.4, fade_out=1.2)
+    assert faded.fade_in == 0.4
+    assert faded.fade_out == 1.2

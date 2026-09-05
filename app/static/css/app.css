@@ -118,9 +118,10 @@ button { cursor: pointer; }
 .workspace {
   flex: 1;
   min-height: 0;
+  overflow: hidden;
   display: grid;
   grid-template-columns: minmax(240px, 34vw) minmax(320px, 1fr);
-  grid-template-rows: 1fr auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   grid-template-areas:
     "preview controls"
     "timeline timeline";
@@ -194,7 +195,8 @@ button { cursor: pointer; }
 
 .controls {
   grid-area: controls;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--hair);
   padding: 12px 14px 16px;
@@ -202,6 +204,7 @@ button { cursor: pointer; }
   flex-direction: column;
   gap: 14px;
   min-height: 0;
+  max-height: 100%;
 }
 .ctrl-block { display: flex; flex-direction: column; gap: 6px; }
 .ctrl-row { display: flex; gap: 10px; align-items: end; }
@@ -443,6 +446,11 @@ button { cursor: pointer; }
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex-shrink: 0;
+  max-height: min(280px, 36vh);
+  min-height: 0;
+  overflow: auto;
+  z-index: 3;
 }
 .tl-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .tl-tools { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; }
@@ -492,6 +500,25 @@ button { cursor: pointer; }
   text-transform: uppercase;
   color: var(--accent-soft);
 }
+.clip-fades {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 22px;
+  align-items: center;
+}
+.fade-ctrl {
+  display: grid;
+  grid-template-columns: auto minmax(80px, 140px) 3.2em;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+.fade-ctrl span {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
 
 .toast {
   position: fixed;
@@ -507,16 +534,22 @@ button { cursor: pointer; }
 }
 
 @media (max-width: 960px) {
-  body { overflow: auto; }
   .workspace {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto;
+    grid-template-rows: minmax(180px, 42vh) minmax(0, 1fr) auto;
     grid-template-areas:
       "preview"
       "controls"
       "timeline";
     height: auto;
+    min-height: 0;
+    flex: 1;
   }
-  .stage-wrap { height: 52vh; }
+  .stage-wrap { height: 42vh; max-height: 42vh; }
   .controls { max-height: none; }
+  .timeline {
+    position: sticky;
+    bottom: 0;
+    max-height: min(240px, 32vh);
+  }
 }

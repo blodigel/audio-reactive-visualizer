@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import math
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -9,10 +11,86 @@ import soundfile as sf
 from scipy import signal
 
 from app.clips import suggest_clips
+from app.config import config
 
 
 class AudioError(ValueError):
     pass
+
+
+AUDIO_EXT = {
+    ".wav",
+    ".wave",
+    ".mp3",
+    ".flac",
+    ".aiff",
+    ".aif",
+    ".aifc",
+    ".m4a",
+    ".aac",
+    ".ogg",
+    ".oga",
+    ".opus",
+    ".wma",
+    ".caf",
+}
+
+
+def _ffmpeg_bin() -> str:
+    path = shutil.which(config.ffmpeg) or shutil.which("ffmpeg")
+    if not path:
+        raise AudioError("ffmpeg not found on PATH. Install ffmpeg or set FFMPEG=/path/to/ffmpeg")
+    return path
+
+
+def decode_to_wav(src: Path, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        _ffmpeg_bin(),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-y",
+        "-i",
+        str(src),
+        "-vn",
+        "-map",
+        "0:a:0",
+        "-ac",
+        "2",
+        "-c:a",
+        "pcm_s16le",
+        str(dest),
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=180)
+    except subprocess.TimeoutExpired as exc:
+        dest.unlink(missing_ok=True)
+        raise AudioError("Decoding timed out. Try a shorter file.") from exc
+    if proc.returncode != 0 or not dest.is_file() or dest.stat().st_size < 64:
+        dest.unlink(missing_ok=True)
+        err = (proc.stderr or b"").decode("utf-8", errors="replace").strip()
+        hint = err[-400:] if err else "unreadable file"
+        raise AudioError(
+            "Could not decode audio. Use WAV, MP3, FLAC, AIFF, M4A, AAC or OGG. "
+            f"({hint})"
+        )
+
+
+def ingest_audio(src: Path, dest: Path) -> None:
+    """Normalize any supported upload to 16-bit stereo PCM WAV at dest."""
+    ext = src.suffix.lower()
+    if ext in {".wav", ".wave"}:
+        try:
+            load_wav(src)
+            if src.resolve() != dest.resolve():
+                shutil.copyfile(src, dest)
+            return
+        except AudioError:
+            pass
+    decode_to_wav(src, dest)
+    load_wav(dest)
 
 
 def load_wav(path: Path) -> tuple[np.ndarray, int]:

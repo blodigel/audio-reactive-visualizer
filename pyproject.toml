@@ -1,7 +1,7 @@
 [project]
 name = "audio-reactive-visualizer"
 version = "1.0.0"
-description = "WAV → Instagram-friendly audio-reactive visualizer clips. Built for noise and experimental music."
+description = "Audio → Instagram-friendly audio-reactive visualizer clips. Built for noise and experimental music."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

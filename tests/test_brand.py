@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from app.fonts import BUNDLED_DIR, public_fonts, resolve_font
@@ -129,3 +130,44 @@ def test_engine_draws_text_and_logo(wav_path, tmp_path: Path):
     assert frame.shape == (120, 120, 3)
     patch = frame[2:22, 88:118]
     assert patch[:, :, 1].mean() > 60
+
+
+def test_text_and_logo_fx_change_pixels(wav_path):
+    data, sr = load_wav(wav_path)
+    spec = spectral_features(mono(data), sr, fps=24)
+    logo = Image.new("RGBA", (48, 24), (0, 255, 180, 255))
+    base = dict(
+        scene="bars",
+        format="square",
+        quality="draft",
+        text="FOG MARGINS",
+        subtext="Rope",
+        font="archivo",
+        logo_position="top-left",
+        logo_size=0.28,
+    )
+    plain = VisualEngine(data, sr, spec, VisualSettings(**base), 160, 160, 0.5, logo=logo)
+    fx = VisualEngine(
+        data,
+        sr,
+        spec,
+        VisualSettings(
+            **base,
+            text_glitch=1,
+            text_chroma=1,
+            text_glow=0.8,
+            text_jitter=0.9,
+            logo_glitch=1,
+            logo_chroma=1,
+            logo_glow=0.8,
+            logo_jitter=0.9,
+        ),
+        160,
+        160,
+        0.5,
+        logo=logo,
+    )
+    a = plain.render_frame(3, 24)
+    b = fx.render_frame(3, 24)
+    assert a.shape == b.shape
+    assert int(np.abs(a.astype(np.int16) - b.astype(np.int16)).sum()) > 500

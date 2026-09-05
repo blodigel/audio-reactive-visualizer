@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from app.audio import interp_feat, interp_spec, window_stereo
 from app.fonts import load_truetype, resolve_font
-from app.logos import apply_logo
+from app.logos import rasterize_logo
 from app.models import VisualSettings
 from app.presets import LOOK, palette_from_settings, resolved_scene
 
@@ -133,6 +133,75 @@ def apply_text(img: np.ndarray, layer_rgba: np.ndarray, opacity: float) -> None:
     rgb = layer_rgba[:, :, :3].astype(np.float32) / 255.0
     img *= 1.0 - alpha
     img += rgb * alpha
+
+
+def fx_rgba(
+    layer: np.ndarray,
+    glow: float,
+    glitch: float,
+    chroma: float,
+    jitter: float,
+    seed: int,
+    frame_i: int,
+) -> np.ndarray:
+    """Glitch / glow / chroma / jitter a premultiplied-ish HxWx4 uint8 overlay."""
+    glow = float(glow)
+    glitch = float(glitch)
+    chroma = float(chroma)
+    jitter = float(jitter)
+    if glow <= 0.02 and glitch <= 0.02 and chroma <= 0.02 and jitter <= 0.02:
+        return layer
+    h, w = layer.shape[:2]
+    out = layer.astype(np.float32)
+    a = out[:, :, 3]
+    ys, xs = np.where(a > 4)
+    if ys.size == 0:
+        return layer
+    pad = int(18 + 28 * max(glow, chroma, jitter, glitch))
+    y0 = max(0, int(ys.min()) - pad)
+    y1 = min(h, int(ys.max()) + 1 + pad)
+    x0 = max(0, int(xs.min()) - pad)
+    x1 = min(w, int(xs.max()) + 1 + pad)
+    crop = out[y0:y1, x0:x1].copy()
+    ch, cw = crop.shape[:2]
+    if glow > 0.02:
+        rgb = crop[:, :, :3]
+        al = crop[:, :, 3:4] / 255.0
+        lit = rgb * al
+        sigma = 2.2 + 11.0 * glow
+        blurred = cv2.GaussianBlur(lit, (0, 0), sigmaX=sigma)
+        a_blur = cv2.GaussianBlur(crop[:, :, 3], (0, 0), sigmaX=sigma * 0.85)
+        crop[:, :, :3] = np.clip(rgb + blurred * glow * 1.55, 0, 255)
+        crop[:, :, 3] = np.clip(crop[:, :, 3] + a_blur * glow * 0.65, 0, 255)
+    if glitch > 0.02:
+        rng = np.random.default_rng(seed + frame_i * 19 + 3)
+        n_slices = int(1 + glitch * 9)
+        for _ in range(n_slices):
+            y = int(rng.integers(0, max(ch - 3, 1)))
+            hh = int(rng.integers(2, max(3, int(4 + glitch * 22))))
+            hh = min(hh, ch - y)
+            shift = int(rng.integers(-int(cw * 0.1 * glitch) - 1, int(cw * 0.1 * glitch) + 2))
+            crop[y : y + hh] = np.roll(crop[y : y + hh], shift, axis=1)
+    if chroma > 0.02:
+        shift = max(1, int(1 + chroma * 8))
+        crop[:, :, 0] = np.roll(crop[:, :, 0], -shift, axis=1)
+        crop[:, :, 2] = np.roll(crop[:, :, 2], shift, axis=1)
+    if jitter > 0.02:
+        rng = np.random.default_rng(seed + frame_i * 31 + 11)
+        dx = int(np.clip(rng.normal() * jitter * cw * 0.04, -cw * 0.12, cw * 0.12))
+        dy = int(np.clip(rng.normal() * jitter * ch * 0.03, -ch * 0.1, ch * 0.1))
+        crop = np.roll(crop, dx, axis=1)
+        crop = np.roll(crop, dy, axis=0)
+        if dx > 0:
+            crop[:, :dx] = 0
+        elif dx < 0:
+            crop[:, dx:] = 0
+        if dy > 0:
+            crop[:dy] = 0
+        elif dy < 0:
+            crop[dy:] = 0
+    out[y0:y1, x0:x1] = crop
+    return np.clip(out, 0, 255).astype(np.uint8)
 
 
 class VisualEngine:
@@ -582,14 +651,34 @@ class VisualEngine:
 
         img = np.clip(img, 0.0, 1.0)
         if self.logo is not None:
-            apply_logo(
-                img,
+            logo_layer = rasterize_logo(
+                self.w,
+                self.h,
                 self.logo,
                 self.settings.logo_position,
                 float(self.settings.logo_size),
-                float(self.settings.logo_opacity),
                 self.settings.text_position,
             )
+            if logo_layer is not None:
+                logo_layer = fx_rgba(
+                    logo_layer,
+                    float(self.settings.logo_glow),
+                    float(self.settings.logo_glitch),
+                    float(self.settings.logo_chroma),
+                    float(self.settings.logo_jitter),
+                    int(self.settings.seed),
+                    frame_i,
+                )
+                apply_text(img, logo_layer, float(self.settings.logo_opacity))
         if self.text_layer is not None:
-            apply_text(img, self.text_layer, float(self.settings.text_opacity))
+            text_layer = fx_rgba(
+                self.text_layer,
+                float(self.settings.text_glow),
+                float(self.settings.text_glitch),
+                float(self.settings.text_chroma),
+                float(self.settings.text_jitter),
+                int(self.settings.seed) + 97,
+                frame_i,
+            )
+            apply_text(img, text_layer, float(self.settings.text_opacity))
         return (img * 255.0 + 0.5).astype(np.uint8)
