@@ -8,8 +8,10 @@ const state = {
   catalog: null,
   track: null,
   settings: {
-    genre: "noise",
-    scene: "auto",
+    scene: "mixed",
+    bg_color: "#050303",
+    effect_color: "#d63d24",
+    text_color: "#ede6dc",
     format: "reels",
     quality: "standard",
     fps: 30,
@@ -65,18 +67,54 @@ function seg(container, items, current, onPick, labelKey = "label") {
   }
 }
 
-function applyGenre(id) {
-  const g = state.catalog.genres.find((x) => x.id === id);
-  if (!g) return;
-  state.settings.genre = id;
-  Object.assign(state.settings, g.defaults);
+function applyPalette(p) {
+  state.settings.bg_color = p.bg_color;
+  state.settings.effect_color = p.effect_color;
+  state.settings.text_color = p.text_color;
   syncControls();
+}
+
+function bindColor(inputId, hexId, key) {
+  const input = $(inputId);
+  const hex = $(hexId);
+  input.value = state.settings[key];
+  hex.textContent = state.settings[key];
+  input.oninput = () => {
+    state.settings[key] = input.value;
+    hex.textContent = input.value;
+    preview.setSettings(state.settings);
+    paintSwatches();
+  };
+}
+
+function paintSwatches() {
+  const box = $("swatches");
+  const palettes = state.catalog?.palettes || [];
+  box.innerHTML = "";
+  const s = state.settings;
+  for (const p of palettes) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "swatch";
+    b.title = p.label;
+    const on =
+      p.bg_color === s.bg_color &&
+      p.effect_color === s.effect_color &&
+      p.text_color === s.text_color;
+    if (on) b.classList.add("on");
+    b.innerHTML = `<i style="background:${p.effect_color}"></i><i style="background:${p.bg_color}"></i>`;
+    b.addEventListener("click", () => applyPalette(p));
+    box.appendChild(b);
+  }
 }
 
 function syncControls() {
   const s = state.settings;
   const c = state.catalog;
-  seg($("genres"), c.genres, s.genre, applyGenre);
+  paintSwatches();
+  bindColor("bg-color", "bg-hex", "bg_color");
+  bindColor("effect-color", "effect-hex", "effect_color");
+  bindColor("text-color", "text-hex", "text_color");
   seg($("scenes"), c.scenes, s.scene, (id) => {
     s.scene = id;
     syncControls();
@@ -402,8 +440,7 @@ function pollJob(id) {
 
 async function boot() {
   state.catalog = await api("/api/presets");
-  const noise = state.catalog.genres.find((g) => g.id === "noise");
-  if (noise) Object.assign(state.settings, noise.defaults, { genre: "noise" });
+  if (state.catalog.defaults) Object.assign(state.settings, state.catalog.defaults);
   syncControls();
   preview.setSettings(state.settings);
   preview.start();

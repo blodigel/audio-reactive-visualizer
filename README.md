@@ -13,12 +13,12 @@ Runs locally in Docker. Nothing is uploaded to a third party.
 1. Drop a **WAV**.
 2. See the waveform, onsets, and **suggested cut points**.
 3. Drag, resize, add or remove the bits of the track you want (8–30s, Instagram-friendly).
-4. Pick a **genre look**, then ride **grain, jitter, glitch, bloom, scanlines, chroma, trail, reactivity**.
+4. Pick **background, effect and text colors** (or a palette swatch), then ride **grain, jitter, glitch, bloom, scanlines, chroma, trail, reactivity**.
 5. Add **title / subtext** on the frame.
 6. Live preview in the browser (reacts to the audio).
 7. **Render** H.264 + AAC MP4s sized for Reels / Shorts, square, 4:5, or landscape.
 
-Default look is crushed blacks, analog snow, rust and bone. Other genres (dark ambient, industrial, drone, black metal, techno, experimental, shoegaze) load their own palettes and motion.
+Default look is crushed blacks, analog snow, rust and bone. Colors are free: rust, ice, blood, acid, or anything from the pickers.
 
 ## Run with Docker
 

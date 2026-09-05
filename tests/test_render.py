@@ -2,7 +2,7 @@ import numpy as np
 
 from app.audio import load_wav, mono, spectral_features
 from app.models import VisualSettings
-from app.presets import GENRE_META, resolved_scene
+from app.presets import SCENE_META, resolved_scene
 from app.render import render_clip
 from app.viz import VisualEngine
 
@@ -10,8 +10,16 @@ from app.viz import VisualEngine
 def test_engine_all_scenes(wav_path):
     data, sr = load_wav(wav_path)
     spec = spectral_features(mono(data), sr, fps=24)
-    for gid in GENRE_META:
-        settings = VisualSettings(genre=gid, scene="auto", format="square", quality="draft", fps=24)
+    for scene in SCENE_META:
+        settings = VisualSettings(
+            scene=scene,
+            bg_color="#050303",
+            effect_color="#d63d24",
+            text_color="#ede6dc",
+            format="square",
+            quality="draft",
+            fps=24,
+        )
         engine = VisualEngine(data, sr, spec, settings, 80, 80, 1.0)
         frame = engine.render_frame(0, 24)
         assert frame.shape == (80, 80, 3)
@@ -22,8 +30,10 @@ def test_engine_all_scenes(wav_path):
 def test_render_tiny_mp4(wav_path, tmp_path):
     out = tmp_path / "out.mp4"
     settings = VisualSettings(
-        genre="noise",
         scene="oscilloscope",
+        bg_color="#050303",
+        effect_color="#d63d24",
+        text_color="#ede6dc",
         format="square",
         quality="draft",
         fps=24,

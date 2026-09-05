@@ -8,7 +8,7 @@ def test_presets(client):
     r = client.get("/api/presets")
     assert r.status_code == 200
     body = r.json()
-    assert len(body["genres"]) >= 8
+    assert len(body["palettes"]) >= 6
     assert body["formats"]
 
 

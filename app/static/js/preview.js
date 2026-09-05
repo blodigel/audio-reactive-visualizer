@@ -1,13 +1,16 @@
-const PALETTES = {
-  noise: { bg: [5, 3, 3], fg: [214, 61, 36], accent: [237, 219, 194] },
-  dark_ambient: { bg: [3, 4, 8], fg: [71, 148, 163], accent: [158, 97, 199] },
-  industrial: { bg: [3, 3, 3], fg: [235, 230, 219], accent: [242, 107, 26] },
-  drone: { bg: [3, 4, 5], fg: [140, 158, 148], accent: [199, 184, 122] },
-  black_metal: { bg: [2, 2, 2], fg: [235, 235, 230], accent: [179, 20, 20] },
-  techno: { bg: [3, 3, 5], fg: [51, 235, 224], accent: [235, 46, 158] },
-  experimental: { bg: [4, 3, 6], fg: [140, 242, 102], accent: [242, 89, 217] },
-  shoegaze: { bg: [8, 5, 7], fg: [235, 140, 173], accent: [158, 184, 242] },
-};
+function hexRgb(hex) {
+  const h = String(hex || "#000000").replace("#", "");
+  if (h.length !== 6) return [0, 0, 0];
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+function paletteFromSettings(s) {
+  return {
+    bg: hexRgb(s.bg_color || "#050303"),
+    fg: hexRgb(s.effect_color || "#d63d24"),
+    accent: hexRgb(s.text_color || "#ede6dc"),
+  };
+}
 
 export class Preview {
   constructor(canvas) {
@@ -138,7 +141,7 @@ export class Preview {
     const { w, h } = this._size();
     const ctx = this.ctx;
     const s = this.settings || {};
-    const pal = PALETTES[s.genre] || PALETTES.noise;
+    const pal = paletteFromSettings(s);
     const b = this._bands();
     const trail = 0.5 + 0.45 * (s.trail ?? 0.4);
 
@@ -159,7 +162,7 @@ export class Preview {
     ctx.drawImage(this.trail, 0, 0);
     ctx.globalAlpha = 1;
 
-    const scene = s.scene === "auto" ? autoScene(s.genre) : s.scene;
+    const scene = !s.scene || s.scene === "auto" ? "mixed" : s.scene;
     const scope = this._scopeFromBuffer(420, w, h);
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
@@ -167,8 +170,8 @@ export class Preview {
     if (scene === "oscilloscope" || scene === "mixed" || scene === "field") {
       strokePath(ctx, scope.xs, scope.ys, pal.fg, 2 + (s.intensity ?? 0.7) * 2);
     }
-    if (scene === "lissajous" || scene === "mixed" || scene === "experimental") {
-      strokePath(ctx, scope.lx, scope.ly, pal.accent, 1.8);
+    if (scene === "lissajous") {
+      strokePath(ctx, scope.lx, scope.ly, pal.fg, 1.8);
     }
     if (scene === "spectrum" || scene === "tunnel") {
       this._ring(ctx, w, h, b, pal.fg);
@@ -179,8 +182,8 @@ export class Preview {
     if (scene === "bars") {
       this._bars(ctx, w, h, b, pal.fg);
     }
-    if (scene === "particles" || scene === "mixed" || scene === "shoegaze") {
-      this._particles(ctx, w, h, b, pal.accent);
+    if (scene === "particles" || scene === "mixed") {
+      this._particles(ctx, w, h, b, pal.fg);
     }
 
     if ((s.glitch ?? 0) > 0.2 && b.energy > 0.55) {
@@ -341,19 +344,4 @@ function strokePath(ctx, xs, ys, rgb, width) {
   ctx.strokeStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
   ctx.lineWidth = width;
   ctx.stroke();
-}
-
-function autoScene(genre) {
-  return (
-    {
-      noise: "mixed",
-      dark_ambient: "spectrum",
-      industrial: "bars",
-      drone: "field",
-      black_metal: "oscilloscope",
-      techno: "tunnel",
-      experimental: "lissajous",
-      shoegaze: "particles",
-    }[genre] || "mixed"
-  );
 }

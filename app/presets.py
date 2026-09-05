@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from app.models import FormatId, GenreId, SceneId, VisualSettings
+from app.models import FormatId, SceneId, VisualSettings
 
 FORMATS: dict[FormatId, dict[str, Any]] = {
     "reels": {
@@ -49,239 +50,27 @@ QUALITY_PRESET = {
     "high": "fast",
 }
 
-# RGB 0-1
-Palette = dict[str, tuple[float, float, float]]
-
-PALETTES: dict[GenreId, Palette] = {
-    "noise": {
-        "bg": (0.018, 0.012, 0.010),
-        "fg": (0.84, 0.24, 0.14),
-        "accent": (0.93, 0.86, 0.76),
-        "fog": (0.14, 0.04, 0.03),
-        "dim": (0.28, 0.09, 0.06),
-    },
-    "dark_ambient": {
-        "bg": (0.010, 0.016, 0.032),
-        "fg": (0.28, 0.58, 0.64),
-        "accent": (0.62, 0.38, 0.78),
-        "fog": (0.04, 0.09, 0.16),
-        "dim": (0.10, 0.20, 0.28),
-    },
-    "industrial": {
-        "bg": (0.012, 0.012, 0.012),
-        "fg": (0.92, 0.90, 0.86),
-        "accent": (0.95, 0.42, 0.10),
-        "fog": (0.10, 0.09, 0.08),
-        "dim": (0.35, 0.32, 0.28),
-    },
-    "drone": {
-        "bg": (0.012, 0.014, 0.018),
-        "fg": (0.55, 0.62, 0.58),
-        "accent": (0.78, 0.72, 0.48),
-        "fog": (0.06, 0.08, 0.10),
-        "dim": (0.18, 0.22, 0.24),
-    },
-    "black_metal": {
-        "bg": (0.008, 0.008, 0.008),
-        "fg": (0.92, 0.92, 0.90),
-        "accent": (0.70, 0.08, 0.08),
-        "fog": (0.08, 0.08, 0.08),
-        "dim": (0.28, 0.28, 0.28),
-    },
-    "techno": {
-        "bg": (0.010, 0.010, 0.018),
-        "fg": (0.20, 0.92, 0.88),
-        "accent": (0.92, 0.18, 0.62),
-        "fog": (0.04, 0.06, 0.14),
-        "dim": (0.12, 0.22, 0.32),
-    },
-    "experimental": {
-        "bg": (0.016, 0.010, 0.022),
-        "fg": (0.55, 0.95, 0.40),
-        "accent": (0.95, 0.35, 0.85),
-        "fog": (0.10, 0.04, 0.14),
-        "dim": (0.30, 0.12, 0.28),
-    },
-    "shoegaze": {
-        "bg": (0.030, 0.018, 0.028),
-        "fg": (0.92, 0.55, 0.68),
-        "accent": (0.62, 0.72, 0.95),
-        "fog": (0.16, 0.08, 0.14),
-        "dim": (0.40, 0.22, 0.32),
-    },
+LOOK = {
+    "crush": 0.08,
+    "contrast": 1.28,
+    "swirl": 0.25,
 }
 
-GENRE_SCENE: dict[GenreId, SceneId] = {
-    "noise": "mixed",
-    "dark_ambient": "spectrum",
-    "industrial": "bars",
-    "drone": "field",
-    "black_metal": "oscilloscope",
-    "techno": "tunnel",
-    "experimental": "lissajous",
-    "shoegaze": "particles",
-}
+HEX_RE = re.compile(r"^#?[0-9A-Fa-f]{6}$")
 
-GENRE_LOOK: dict[GenreId, dict[str, float]] = {
-    "noise": {
-        "grain": 0.48,
-        "jitter": 0.32,
-        "bloom": 0.22,
-        "intensity": 0.78,
-        "glitch": 0.38,
-        "scanlines": 0.52,
-        "vignette": 0.72,
-        "chromatic": 0.22,
-        "trail": 0.42,
-        "reactivity": 0.88,
-        "crush": 0.08,
-        "contrast": 1.28,
-        "swirl": 0.25,
-    },
-    "dark_ambient": {
-        "grain": 0.22,
-        "jitter": 0.08,
-        "bloom": 0.55,
-        "intensity": 0.55,
-        "glitch": 0.05,
-        "scanlines": 0.18,
-        "vignette": 0.78,
-        "chromatic": 0.12,
-        "trail": 0.62,
-        "reactivity": 0.45,
-        "crush": 0.04,
-        "contrast": 1.05,
-        "swirl": 0.55,
-    },
-    "industrial": {
-        "grain": 0.28,
-        "jitter": 0.42,
-        "bloom": 0.18,
-        "intensity": 0.92,
-        "glitch": 0.48,
-        "scanlines": 0.35,
-        "vignette": 0.55,
-        "chromatic": 0.18,
-        "trail": 0.18,
-        "reactivity": 0.95,
-        "crush": 0.05,
-        "contrast": 1.35,
-        "swirl": 0.10,
-    },
-    "drone": {
-        "grain": 0.30,
-        "jitter": 0.06,
-        "bloom": 0.40,
-        "intensity": 0.50,
-        "glitch": 0.04,
-        "scanlines": 0.22,
-        "vignette": 0.80,
-        "chromatic": 0.08,
-        "trail": 0.72,
-        "reactivity": 0.35,
-        "crush": 0.06,
-        "contrast": 1.08,
-        "swirl": 0.70,
-    },
-    "black_metal": {
-        "grain": 0.55,
-        "jitter": 0.22,
-        "bloom": 0.10,
-        "intensity": 0.82,
-        "glitch": 0.22,
-        "scanlines": 0.40,
-        "vignette": 0.85,
-        "chromatic": 0.06,
-        "trail": 0.28,
-        "reactivity": 0.80,
-        "crush": 0.12,
-        "contrast": 1.45,
-        "swirl": 0.15,
-    },
-    "techno": {
-        "grain": 0.12,
-        "jitter": 0.18,
-        "bloom": 0.48,
-        "intensity": 0.85,
-        "glitch": 0.12,
-        "scanlines": 0.08,
-        "vignette": 0.50,
-        "chromatic": 0.28,
-        "trail": 0.35,
-        "reactivity": 1.00,
-        "crush": 0.02,
-        "contrast": 1.18,
-        "swirl": 0.40,
-    },
-    "experimental": {
-        "grain": 0.40,
-        "jitter": 0.35,
-        "bloom": 0.32,
-        "intensity": 0.80,
-        "glitch": 0.62,
-        "scanlines": 0.28,
-        "vignette": 0.48,
-        "chromatic": 0.45,
-        "trail": 0.38,
-        "reactivity": 0.90,
-        "crush": 0.03,
-        "contrast": 1.20,
-        "swirl": 0.45,
-    },
-    "shoegaze": {
-        "grain": 0.18,
-        "jitter": 0.10,
-        "bloom": 0.78,
-        "intensity": 0.62,
-        "glitch": 0.04,
-        "scanlines": 0.12,
-        "vignette": 0.60,
-        "chromatic": 0.32,
-        "trail": 0.80,
-        "reactivity": 0.50,
-        "crush": 0.01,
-        "contrast": 0.95,
-        "swirl": 0.60,
-    },
-}
-
-GENRE_META: dict[GenreId, dict[str, str]] = {
-    "noise": {
-        "label": "Noise",
-        "blurb": "Crushed blacks, analog snow, rust and bone. Default for harsh / experimental.",
-    },
-    "dark_ambient": {
-        "label": "Dark ambient",
-        "blurb": "Slow fog, deep teal and violet, soft bloom.",
-    },
-    "industrial": {
-        "label": "Industrial",
-        "blurb": "Hard transients, strobe, metal on black.",
-    },
-    "drone": {
-        "label": "Drone",
-        "blurb": "Long trails, slow field, almost still.",
-    },
-    "black_metal": {
-        "label": "Black metal",
-        "blurb": "High-contrast frost, bone white, blood flash.",
-    },
-    "techno": {
-        "label": "Techno",
-        "blurb": "Beat-locked geometry, cyan / magenta punch.",
-    },
-    "experimental": {
-        "label": "Experimental",
-        "blurb": "Glitch, channel-split, unstable color.",
-    },
-    "shoegaze": {
-        "label": "Shoegaze",
-        "blurb": "Washed bloom, smear, pastel on dusk.",
-    },
-}
+COLOR_PRESETS: list[dict[str, str]] = [
+    {"id": "rust", "label": "Rust", "bg_color": "#050303", "effect_color": "#d63d24", "text_color": "#ede6dc"},
+    {"id": "bone", "label": "Bone", "bg_color": "#0c0b0a", "effect_color": "#e8c9a8", "text_color": "#f4eee6"},
+    {"id": "ice", "label": "Ice", "bg_color": "#03050c", "effect_color": "#47a4b3", "text_color": "#dce8f0"},
+    {"id": "blood", "label": "Blood", "bg_color": "#080808", "effect_color": "#c41414", "text_color": "#f0f0ee"},
+    {"id": "acid", "label": "Acid", "bg_color": "#040306", "effect_color": "#8cf266", "text_color": "#f2e6ff"},
+    {"id": "cyan", "label": "Cyan", "bg_color": "#030305", "effect_color": "#33ebe0", "text_color": "#f2e6f0"},
+    {"id": "violet", "label": "Violet", "bg_color": "#08050c", "effect_color": "#9e61c7", "text_color": "#ede6dc"},
+    {"id": "white", "label": "White", "bg_color": "#020202", "effect_color": "#ebebe6", "text_color": "#c4452e"},
+]
 
 SCENE_META: dict[SceneId, dict[str, str]] = {
-    "auto": {"label": "Auto", "blurb": "Scene follows the genre."},
+    "mixed": {"label": "Mixed", "blurb": "Field + scope + particles."},
     "oscilloscope": {"label": "Scope", "blurb": "Classic waveform trace."},
     "lissajous": {"label": "Lissajous", "blurb": "Stereo X/Y figure."},
     "spectrum": {"label": "Spectrum", "blurb": "Circular frequency ring."},
@@ -289,14 +78,50 @@ SCENE_META: dict[SceneId, dict[str, str]] = {
     "field": {"label": "Field", "blurb": "Warped analog plasma."},
     "particles": {"label": "Particles", "blurb": "Sparks that explode on hits."},
     "bars": {"label": "Bars", "blurb": "Harsh spectral columns."},
-    "mixed": {"label": "Mixed", "blurb": "Field + scope + particles."},
 }
 
 
+def normalize_hex(value: str) -> str:
+    raw = value.strip()
+    if not HEX_RE.match(raw):
+        raise ValueError("Color must be #RRGGBB")
+    if not raw.startswith("#"):
+        raw = "#" + raw
+    return raw.lower()
+
+
+def parse_hex(value: str) -> tuple[float, float, float]:
+    h = normalize_hex(value)[1:]
+    r = int(h[0:2], 16) / 255.0
+    g = int(h[2:4], 16) / 255.0
+    b = int(h[4:6], 16) / 255.0
+    return (r, g, b)
+
+
+def _mix(
+    a: tuple[float, float, float], b: tuple[float, float, float], t: float
+) -> tuple[float, float, float]:
+    return (
+        a[0] * (1 - t) + b[0] * t,
+        a[1] * (1 - t) + b[1] * t,
+        a[2] * (1 - t) + b[2] * t,
+    )
+
+
+def palette_from_settings(settings: VisualSettings) -> dict[str, tuple[float, float, float]]:
+    bg = parse_hex(settings.bg_color)
+    fg = parse_hex(settings.effect_color)
+    text = parse_hex(settings.text_color)
+    fog = _mix(bg, fg, 0.22)
+    fog = tuple(min(c, 0.28) for c in fog)  # type: ignore[assignment]
+    dim = _mix(bg, fg, 0.42)
+    return {"bg": bg, "fg": fg, "accent": text, "fog": fog, "dim": dim}
+
+
 def resolved_scene(settings: VisualSettings) -> SceneId:
-    if settings.scene != "auto":
-        return settings.scene
-    return GENRE_SCENE[settings.genre]
+    if settings.scene == "auto":
+        return "mixed"
+    return settings.scene
 
 
 def output_size(fmt: FormatId, quality: str) -> tuple[int, int]:
@@ -309,43 +134,19 @@ def output_size(fmt: FormatId, quality: str) -> tuple[int, int]:
     return max(w, 2), max(h, 2)
 
 
-def settings_from_genre(genre: GenreId) -> VisualSettings:
-    look = GENRE_LOOK[genre]
-    payload = {k: look[k] for k in VisualSettings.model_fields if k in look}
-    payload["genre"] = genre
-    payload["scene"] = "auto"
-    return VisualSettings(**payload)
-
-
 def public_catalog() -> dict[str, Any]:
-    genres = []
-    for gid, meta in GENRE_META.items():
-        look = GENRE_LOOK[gid]
-        genres.append(
-            {
-                "id": gid,
-                "label": meta["label"],
-                "blurb": meta["blurb"],
-                "scene": GENRE_SCENE[gid],
-                "defaults": {k: look[k] for k in (
-                    "grain",
-                    "jitter",
-                    "bloom",
-                    "intensity",
-                    "glitch",
-                    "scanlines",
-                    "vignette",
-                    "chromatic",
-                    "trail",
-                    "reactivity",
-                )},
-                "palette": {k: list(v) for k, v in PALETTES[gid].items()},
-            }
-        )
     return {
-        "genres": genres,
+        "palettes": COLOR_PRESETS,
         "scenes": [{"id": k, **v} for k, v in SCENE_META.items()],
-        "formats": [{"id": k, **{kk: vv for kk, vv in v.items() if kk != "size"}, "width": v["size"][0], "height": v["size"][1]} for k, v in FORMATS.items()],
+        "formats": [
+            {
+                "id": k,
+                **{kk: vv for kk, vv in v.items() if kk != "size"},
+                "width": v["size"][0],
+                "height": v["size"][1],
+            }
+            for k, v in FORMATS.items()
+        ],
         "qualities": [
             {"id": "draft", "label": "Draft", "blurb": "Half-res, faster preview encode."},
             {"id": "standard", "label": "Standard", "blurb": "1080, good for posting."},
@@ -363,4 +164,10 @@ def public_catalog() -> dict[str, Any]:
             {"key": "trail", "label": "Trail", "blurb": "Phosphor persistence"},
             {"key": "reactivity", "label": "Reactivity", "blurb": "How tightly it follows the audio"},
         ],
+        "defaults": {
+            "bg_color": COLOR_PRESETS[0]["bg_color"],
+            "effect_color": COLOR_PRESETS[0]["effect_color"],
+            "text_color": COLOR_PRESETS[0]["text_color"],
+            "scene": "mixed",
+        },
     }

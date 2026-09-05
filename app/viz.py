@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw, ImageFont
 from app.audio import interp_feat, interp_spec, window_stereo
 from app.fonts import find_font
 from app.models import VisualSettings
-from app.presets import GENRE_LOOK, PALETTES, resolved_scene
+from app.presets import LOOK, palette_from_settings, resolved_scene
 
 
 def _col(rgb: tuple[float, float, float], scale: float = 255.0) -> tuple[int, int, int]:
@@ -161,8 +161,8 @@ class VisualEngine:
         self.h = height
         self.clip_start = clip_start
         self.scene = resolved_scene(settings)
-        self.palette = PALETTES[settings.genre]
-        self.look = GENRE_LOOK[settings.genre]
+        self.palette = palette_from_settings(settings)
+        self.look = LOOK
         self.rng = np.random.default_rng(settings.seed + 17)
         self.trail = np.zeros((height, width, 3), dtype=np.float32)
         self.vignette = make_vignette(height, width)
@@ -357,29 +357,28 @@ class VisualEngine:
         xs = rng.integers(0, self.w, n)
         ys = rng.integers(0, self.h, n)
         v = 0.45 + 0.5 * float(self.settings.grain)
-        img[ys, xs] = np.clip(img[ys, xs] + v * _rgb(self.palette["accent"]), 0.0, 1.0)
+        img[ys, xs] = np.clip(img[ys, xs] + v * _rgb(self.palette["fg"]), 0.0, 1.0)
 
     def _draw_scene(self, layer: np.ndarray, feat: dict, t: float) -> None:
         fg = _col(self.palette["fg"])
-        accent = _col(self.palette["accent"])
         scene = self.scene
         if scene in ("field",):
             return
         if scene == "oscilloscope":
             glow_polyline(layer, self._scope_pts(t), fg, 2)
         elif scene == "lissajous":
-            glow_polyline(layer, self._liss_pts(t), accent, 2)
+            glow_polyline(layer, self._liss_pts(t), fg, 2)
         elif scene == "spectrum":
             self._draw_spectrum_ring(layer, feat, fg)
         elif scene == "tunnel":
             self._draw_tunnel(layer, feat, t, fg)
         elif scene == "particles":
-            self._draw_particles(layer, feat, accent)
+            self._draw_particles(layer, feat, fg)
         elif scene == "bars":
             self._draw_bars(layer, feat, fg)
         elif scene == "mixed":
             glow_polyline(layer, self._scope_pts(t), fg, 2)
-            self._draw_particles(layer, feat, accent)
+            self._draw_particles(layer, feat, fg)
         else:
             glow_polyline(layer, self._scope_pts(t), fg, 2)
 
@@ -402,7 +401,7 @@ class VisualEngine:
 
         # onset flash
         if feat["onset"] > 0.5:
-            flash = _rgb(self.palette["accent"]) * (feat["onset"] - 0.5) * 0.55 * self.settings.intensity
+            flash = _rgb(self.palette["fg"]) * (feat["onset"] - 0.5) * 0.55 * self.settings.intensity
             img += flash
 
         # glitch slices
@@ -454,7 +453,7 @@ class VisualEngine:
             out[:, :, 2] = np.roll(img[:, :, 2], shift, axis=1)
             img = out
 
-        # crush + contrast from genre
+        # crush + contrast
         crush = float(self.look.get("crush", 0.05))
         contrast = float(self.look.get("contrast", 1.15))
         img = np.clip((img - crush) / max(1.0 - crush, 0.2), 0.0, 1.0)

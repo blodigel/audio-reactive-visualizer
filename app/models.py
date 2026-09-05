@@ -1,19 +1,10 @@
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-GenreId = Literal[
-    "noise",
-    "dark_ambient",
-    "industrial",
-    "drone",
-    "black_metal",
-    "techno",
-    "experimental",
-    "shoegaze",
-]
 SceneId = Literal[
     "auto",
     "oscilloscope",
@@ -45,9 +36,23 @@ class ClipIn(BaseModel):
         return self
 
 
+_HEX = re.compile(r"^#?[0-9A-Fa-f]{6}$")
+
+
+def _hex_color(value: str) -> str:
+    raw = value.strip()
+    if not _HEX.match(raw):
+        raise ValueError("Color must be #RRGGBB")
+    if not raw.startswith("#"):
+        raw = "#" + raw
+    return raw.lower()
+
+
 class VisualSettings(BaseModel):
-    genre: GenreId = "noise"
-    scene: SceneId = "auto"
+    scene: SceneId = "mixed"
+    bg_color: str = "#050303"
+    effect_color: str = "#d63d24"
+    text_color: str = "#ede6dc"
     format: FormatId = "reels"
     quality: QualityId = "standard"
     fps: int = Field(default=30, ge=12, le=60)
@@ -72,6 +77,11 @@ class VisualSettings(BaseModel):
     @classmethod
     def strip_text(cls, v: str) -> str:
         return v.strip()
+
+    @field_validator("bg_color", "effect_color", "text_color")
+    @classmethod
+    def colors(cls, v: str) -> str:
+        return _hex_color(v)
 
 
 class SuggestIn(BaseModel):
