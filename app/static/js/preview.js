@@ -24,6 +24,7 @@ export class Preview {
     this.srcNode = null;
     this.running = false;
     this._lookKey = "";
+    this.bgImage = null;
     this.grain = this._makeGrain();
     this.trail = document.createElement("canvas");
     this.tctx = this.trail.getContext("2d");
@@ -50,9 +51,15 @@ export class Preview {
     return c;
   }
 
+  setBackground(img) {
+    this.bgImage = img || null;
+    this._lookKey = "";
+    if (this.running) this.draw();
+  }
+
   setSettings(s) {
     this.settings = s;
-    const key = `${s?.bg_color || ""}|${s?.effect_color || ""}|${s?.text_color || ""}|${s?.scene || ""}`;
+    const key = `${s?.bg_color || ""}|${s?.effect_color || ""}|${s?.text_color || ""}|${s?.scene || ""}|${s?.background_id || ""}`;
     if (key !== this._lookKey) {
       this._lookKey = key;
       this.tctx.clearRect(0, 0, this.trail.width || 0, this.trail.height || 0);
@@ -151,7 +158,7 @@ export class Preview {
     const pal = paletteFromSettings(s);
     const b = this._bands();
     const trail = 0.5 + 0.45 * (s.trail ?? 0.4);
-    const lookKey = `${s.bg_color || ""}|${s.effect_color || ""}|${s.text_color || ""}|${s.scene || ""}`;
+    const lookKey = `${s.bg_color || ""}|${s.effect_color || ""}|${s.text_color || ""}|${s.scene || ""}|${s.background_id || ""}`;
     const lookChanged = lookKey !== this._lookKey;
     if (lookChanged) {
       this._lookKey = lookKey;
@@ -164,6 +171,11 @@ export class Preview {
 
     ctx.fillStyle = `rgb(${pal.bg[0]},${pal.bg[1]},${pal.bg[2]})`;
     ctx.fillRect(0, 0, w, h);
+    if (this.bgImage) {
+      drawCover(ctx, this.bgImage, w, h);
+      ctx.fillStyle = `rgba(${pal.bg[0]},${pal.bg[1]},${pal.bg[2]},0.22)`;
+      ctx.fillRect(0, 0, w, h);
+    }
 
     const g = ctx.createRadialGradient(w / 2, h / 2, 10, w / 2, h / 2, Math.max(w, h) * 0.7);
     g.addColorStop(0, `rgba(${pal.fg[0]},${pal.fg[1]},${pal.fg[2]},${0.08 + b.energy * 0.18})`);
@@ -341,6 +353,16 @@ function avg(arr, a, b) {
     n++;
   }
   return n ? s / n : 0;
+}
+
+function drawCover(ctx, img, w, h) {
+  const iw = img.naturalWidth || img.width;
+  const ih = img.naturalHeight || img.height;
+  if (!iw || !ih) return;
+  const scale = Math.max(w / iw, h / ih);
+  const nw = iw * scale;
+  const nh = ih * scale;
+  ctx.drawImage(img, (w - nw) / 2, (h - nh) / 2, nw, nh);
 }
 
 function strokePath(ctx, xs, ys, rgb, width) {

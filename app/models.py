@@ -53,6 +53,7 @@ class VisualSettings(BaseModel):
     bg_color: str = "#050303"
     effect_color: str = "#d63d24"
     text_color: str = "#ede6dc"
+    background_id: str = ""
     format: FormatId = "reels"
     quality: QualityId = "standard"
     fps: int = Field(default=30, ge=12, le=60)
@@ -82,6 +83,16 @@ class VisualSettings(BaseModel):
     @classmethod
     def colors(cls, v: str) -> str:
         return _hex_color(v)
+
+    @field_validator("background_id")
+    @classmethod
+    def bg_id(cls, v: str) -> str:
+        raw = v.strip()
+        if not raw:
+            return ""
+        if not re.fullmatch(r"[a-fA-F0-9]{12,32}", raw):
+            raise ValueError("Invalid background id")
+        return raw.lower()
 
 
 class SuggestIn(BaseModel):

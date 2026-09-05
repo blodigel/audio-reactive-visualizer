@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.audio import AudioError, analyze_file
+from app.backgrounds import ALLOWED_EXT, BackgroundError, save_upload
 from app.clips import suggest_clips
 from app.config import config
 from app.demo import write_demo_wav
@@ -138,6 +139,52 @@ def create_app() -> FastAPI:
         meta["suggestions"] = suggestions
         (_track_dir(track_id) / "meta.json").write_text(json.dumps(meta))
         return {"suggestions": suggestions}
+
+    @app.post("/api/backgrounds")
+    async def upload_background(file: UploadFile = File(...)) -> dict:
+        name = file.filename or "background.png"
+        ext = Path(name).suffix.lower()
+        if ext not in ALLOWED_EXT:
+            raise HTTPException(400, "Use a PNG, JPEG or WebP image")
+        bg_id = uuid.uuid4().hex[:16]
+        raw = config.backgrounds_dir / f"{bg_id}.src{ext}"
+        dest = config.backgrounds_dir / f"{bg_id}.png"
+        limit = 25 * 1024 * 1024
+        written = 0
+        try:
+            with raw.open("wb") as out:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > limit:
+                        raise HTTPException(413, "Image is larger than 25 MB")
+                    out.write(chunk)
+        except HTTPException:
+            raw.unlink(missing_ok=True)
+            raise
+        finally:
+            await file.close()
+        if written < 32:
+            raw.unlink(missing_ok=True)
+            raise HTTPException(400, "File is empty")
+        try:
+            save_upload(raw, dest)
+        except BackgroundError as exc:
+            dest.unlink(missing_ok=True)
+            raise HTTPException(400, str(exc)) from exc
+        finally:
+            raw.unlink(missing_ok=True)
+        return {"id": bg_id, "filename": name, "url": f"/api/backgrounds/{bg_id}"}
+
+    @app.get("/api/backgrounds/{bg_id}")
+    def get_background(bg_id: str) -> FileResponse:
+        _check_id(bg_id)
+        path = config.backgrounds_dir / f"{bg_id}.png"
+        if not path.is_file():
+            raise HTTPException(404, "Background not found")
+        return FileResponse(path, media_type="image/png", filename="background.png")
 
     @app.post("/api/jobs")
     def start_job(body: RenderRequest) -> dict:

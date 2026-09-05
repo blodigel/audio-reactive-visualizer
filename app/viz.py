@@ -145,6 +145,7 @@ class VisualEngine:
         width: int,
         height: int,
         clip_start: float,
+        background: np.ndarray | None = None,
     ):
         self.data = data
         self.sr = sr
@@ -153,6 +154,7 @@ class VisualEngine:
         self.w = width
         self.h = height
         self.clip_start = clip_start
+        self.bg_photo = background
         self.scene = resolved_scene(settings)
         self.palette = palette_from_settings(settings)
         self.look = LOOK
@@ -382,8 +384,12 @@ class VisualEngine:
         decay = float(np.clip(decay, 0.45, 0.94))
         img = self.trail * decay
         field = self._field(feat, t)
-        # mix field under trail so plasma stays present
-        img = np.clip(field * (0.72 + 0.15 * (1.0 - self.settings.trail)) + img * 0.85, 0.0, 1.0)
+        if self.bg_photo is not None:
+            wash = field - _rgb(self.palette["bg"])
+            live = np.clip(self.bg_photo * 0.92 + wash * 0.55, 0.0, 1.0)
+        else:
+            live = field
+        img = np.clip(live * (0.72 + 0.15 * (1.0 - self.settings.trail)) + img * 0.85, 0.0, 1.0)
 
         layer_bgr = np.zeros((self.h, self.w, 3), dtype=np.uint8)
         self._draw_scene(layer_bgr, feat, t)

@@ -12,6 +12,7 @@ const state = {
     bg_color: "#050303",
     effect_color: "#d63d24",
     text_color: "#ede6dc",
+    background_id: "",
     format: "reels",
     quality: "standard",
     fps: 30,
@@ -34,6 +35,7 @@ const state = {
   },
   job: null,
   poll: null,
+  bgName: "",
 };
 
 const audioEl = new Audio();
@@ -180,8 +182,11 @@ function syncControls() {
   $("text").value = s.text;
   $("subtext").value = s.subtext;
   $("text-size").value = String(s.text_size);
-  preview.setSettings(s);
+  preview.setSettings({ ...s });
   $("stage").dataset.format = s.format;
+  const hasBg = Boolean(s.background_id);
+  $("bg-clear").hidden = !hasBg;
+  $("bg-name").textContent = hasBg ? state.bgName || "custom image" : "";
 }
 
 function renderClipList(clips, selected) {
@@ -265,6 +270,41 @@ function currentClipWindow() {
   return { start: 0, end: state.track?.duration || 0 };
 }
 
+function loadPreviewBg(id) {
+  if (!id) {
+    preview.setBackground(null);
+    return;
+  }
+  const img = new Image();
+  img.onload = () => preview.setBackground(img);
+  img.onerror = () => toast("Could not load background image");
+  img.src = `/api/backgrounds/${id}`;
+}
+
+$("bg-import").addEventListener("click", () => $("bg-file").click());
+$("bg-file").addEventListener("change", async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = "";
+  if (!file) return;
+  try {
+    const fd = new FormData();
+    fd.append("file", file);
+    const meta = await api("/api/backgrounds", { method: "POST", body: fd });
+    state.settings.background_id = meta.id;
+    state.bgName = meta.filename || "custom image";
+    loadPreviewBg(meta.id);
+    syncControls();
+  } catch (err) {
+    toast(err.message || String(err));
+  }
+});
+$("bg-clear").addEventListener("click", () => {
+  state.settings.background_id = "";
+  state.bgName = "";
+  preview.setBackground(null);
+  syncControls();
+});
+
 $("browse").addEventListener("click", () => $("file").click());
 $("file").addEventListener("change", (e) => handleFile(e.target.files[0]));
 $("replace").addEventListener("click", () => $("file").click());
@@ -297,7 +337,17 @@ $("demo").addEventListener("click", async () => {
 });
 window.addEventListener("drop", (e) => {
   const f = e.dataTransfer?.files?.[0];
-  if (f) handleFile(f);
+  if (!f) return;
+  const name = (f.name || "").toLowerCase();
+  const image = (f.type || "").startsWith("image/") || /\.(png|jpe?g|webp)$/.test(name);
+  if (image) {
+    const dt = new DataTransfer();
+    dt.items.add(f);
+    $("bg-file").files = dt.files;
+    $("bg-file").dispatchEvent(new Event("change"));
+    return;
+  }
+  handleFile(f);
 });
 
 $("play").addEventListener("click", async () => {

@@ -20,9 +20,14 @@ class AppConfig(BaseSettings):
     def jobs_dir(self) -> Path:
         return self.data_dir / "jobs"
 
+    @property
+    def backgrounds_dir(self) -> Path:
+        return self.data_dir / "backgrounds"
+
     def ensure_dirs(self) -> None:
         self.tracks_dir.mkdir(parents=True, exist_ok=True)
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
+        self.backgrounds_dir.mkdir(parents=True, exist_ok=True)
 
 
 config = AppConfig()

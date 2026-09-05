@@ -12,6 +12,7 @@ import numpy as np
 from app.audio import load_wav, spectral_features, mono
 from app.config import config
 from app.models import VisualSettings
+from app.backgrounds import load_cover
 from app.presets import QUALITY_CRF, QUALITY_PRESET, output_size
 from app.viz import VisualEngine
 
@@ -50,7 +51,8 @@ def render_clip(
     fps = int(settings.fps)
     w, h = output_size(settings.format, settings.quality)
     spec = spectral_features(mono(data), sr, fps=fps)
-    engine = VisualEngine(data, sr, spec, settings, w, h, start)
+    bg = load_cover(settings.background_id, w, h)
+    engine = VisualEngine(data, sr, spec, settings, w, h, start, background=bg)
     n_frames = max(1, int(round(duration * fps)))
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
