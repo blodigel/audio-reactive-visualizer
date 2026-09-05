@@ -55,8 +55,9 @@ function toast(msg) {
 }
 
 function seg(container, items, current, onPick, labelKey = "label") {
+  if (!container) return;
   container.innerHTML = "";
-  for (const item of items) {
+  for (const item of items || []) {
     const b = document.createElement("button");
     b.type = "button";
     b.textContent = item[labelKey] || item.id;
@@ -77,6 +78,7 @@ function applyPalette(p) {
 function bindColor(inputId, hexId, key) {
   const input = $(inputId);
   const hex = $(hexId);
+  if (!input || !hex) return;
   input.value = state.settings[key];
   hex.textContent = state.settings[key];
   input.oninput = () => {
@@ -89,6 +91,7 @@ function bindColor(inputId, hexId, key) {
 
 function paintSwatches() {
   const box = $("swatches");
+  if (!box) return;
   const palettes = state.catalog?.palettes || [];
   box.innerHTML = "";
   const s = state.settings;
@@ -110,7 +113,7 @@ function paintSwatches() {
 
 function syncControls() {
   const s = state.settings;
-  const c = state.catalog;
+  const c = state.catalog || {};
   paintSwatches();
   bindColor("bg-color", "bg-hex", "bg_color");
   bindColor("effect-color", "effect-hex", "effect_color");
@@ -146,8 +149,8 @@ function syncControls() {
   );
 
   const box = $("sliders");
-  box.innerHTML = "";
-  for (const sl of c.sliders) {
+  if (box) box.innerHTML = "";
+  for (const sl of c.sliders || []) {
     const wrap = document.createElement("div");
     wrap.className = "slider";
     wrap.innerHTML = `<label>${sl.label}</label><span class="val"></span>`;
@@ -169,7 +172,7 @@ function syncControls() {
       preview.setSettings(s);
     });
     wrap.appendChild(input);
-    box.appendChild(wrap);
+    if (box) box.appendChild(wrap);
   }
   $("text").value = s.text;
   $("subtext").value = s.subtext;
@@ -207,7 +210,9 @@ function updatePlayRange() {
 
 function setWorkspace(on) {
   $("drop").hidden = on;
-  $("workspace").hidden = !on;
+  $("stage").hidden = !on;
+  $("timeline").hidden = !on;
+  $("transport").hidden = !on;
 }
 
 async function loadTrack(meta) {

@@ -83,17 +83,20 @@ button { cursor: pointer; }
 
 .drop {
   flex: 1;
+  align-self: stretch;
+  width: 100%;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 18px;
+  margin: 0;
   border: 1px dashed var(--hair-2);
   background:
     radial-gradient(1200px 400px at 50% 0%, rgba(212, 82, 62, 0.07), transparent 60%),
     var(--panel);
 }
 .drop.over { border-color: var(--accent); background: var(--accent-dim); }
-.drop-inner { max-width: 560px; padding: 48px 28px; text-align: left; }
+.drop-inner { max-width: 420px; padding: 28px 22px; text-align: left; }
 .drop-kicker {
   font-family: var(--mono);
   font-size: 10px;
@@ -102,7 +105,7 @@ button { cursor: pointer; }
   margin-bottom: 16px;
 }
 .drop h1 {
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 560;
   letter-spacing: -0.03em;
   line-height: 1.15;
