@@ -28,6 +28,10 @@ export class Preview {
     this.grain = this._makeGrain();
     this.trail = document.createElement("canvas");
     this.tctx = this.trail.getContext("2d");
+    this.bloom = document.createElement("canvas");
+    this.bctx = this.bloom.getContext("2d");
+    this.chroma = document.createElement("canvas");
+    this.cctx = this.chroma.getContext("2d");
     this.particles = Array.from({ length: 120 }, () => ({
       x: Math.random(),
       y: Math.random(),
@@ -120,9 +124,10 @@ export class Preview {
     const time = new Uint8Array(this.analyser.fftSize);
     this.analyser.getByteFrequencyData(freq);
     this.analyser.getByteTimeDomainData(time);
-    const bass = avg(freq, 0, 24) / 255;
-    const mid = avg(freq, 24, 90) / 255;
-    const high = avg(freq, 90, 220) / 255;
+    const react = 0.35 + 0.65 * (this.settings?.reactivity ?? 0.85);
+    const bass = Math.min(1.4, (avg(freq, 0, 24) / 255) * react);
+    const mid = Math.min(1.4, (avg(freq, 24, 90) / 255) * react);
+    const high = Math.min(1.4, (avg(freq, 90, 220) / 255) * react);
     const energy = bass * 0.45 + mid * 0.35 + high * 0.2;
     return { freq, time, bass, mid, high, energy };
   }
@@ -157,14 +162,14 @@ export class Preview {
     const s = this.settings || {};
     const pal = paletteFromSettings(s);
     const b = this._bands();
-    const trail = 0.5 + 0.45 * (s.trail ?? 0.4);
+    const trailAmt = s.trail ?? 0.4;
     const lookKey = `${s.bg_color || ""}|${s.effect_color || ""}|${s.text_color || ""}|${s.scene || ""}|${s.background_id || ""}|${s.bg_opacity ?? ""}`;
     const lookChanged = lookKey !== this._lookKey;
     if (lookChanged) {
       this._lookKey = lookKey;
       this.tctx.clearRect(0, 0, this.trail.width, this.trail.height);
-    } else {
-      this.tctx.globalAlpha = trail;
+    } else if (trailAmt > 0.02) {
+      this.tctx.globalAlpha = 0.4 + 0.55 * trailAmt;
       this.tctx.drawImage(this.canvas, 0, 0);
       this.tctx.globalAlpha = 1;
     }
@@ -185,16 +190,18 @@ export class Preview {
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
 
-    ctx.globalAlpha = 0.72;
-    ctx.drawImage(this.trail, 0, 0);
-    ctx.globalAlpha = 1;
+    if (trailAmt > 0.02) {
+      ctx.globalAlpha = 0.2 + 0.7 * trailAmt;
+      ctx.drawImage(this.trail, 0, 0);
+      ctx.globalAlpha = 1;
+    }
 
     const scene = !s.scene || s.scene === "auto" ? "mixed" : s.scene;
     const scope = this._scopeFromBuffer(420, w, h);
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
 
-    if (scene === "oscilloscope" || scene === "mixed" || scene === "field") {
+    if (scene === "oscilloscope" || scene === "mixed") {
       strokePath(ctx, scope.xs, scope.ys, pal.fg, 2 + (s.intensity ?? 0.7) * 2);
     }
     if (scene === "lissajous") {
@@ -217,33 +224,40 @@ export class Preview {
     if (scene === "kaleido") this._kaleido(ctx, w, h, scope, pal.fg);
     if (scene === "orbits") this._orbits(ctx, w, h, b, pal.fg);
 
-    if ((s.glitch ?? 0) > 0.2 && b.energy > 0.55) {
-      const slices = 2 + Math.floor((s.glitch ?? 0) * 6);
+    const gamt = s.glitch ?? 0;
+    if (gamt > 0.02 && (b.energy * gamt > 0.08 || gamt > 0.45)) {
+      const slices = 1 + Math.floor(gamt * 10 * (0.35 + b.energy));
       for (let i = 0; i < slices; i++) {
         const y = Math.random() * h;
-        const hh = 4 + Math.random() * 18;
-        const dx = (Math.random() - 0.5) * w * 0.08 * (s.glitch ?? 0);
+        const hh = 3 + Math.random() * (6 + gamt * 24);
+        const dx = (Math.random() - 0.5) * w * 0.1 * gamt;
         ctx.drawImage(this.canvas, 0, y, w, hh, dx, y, w, hh);
       }
     }
 
-    const grainA = (s.grain ?? 0.4) * 0.18;
+    this._bloom(ctx, w, h, s.bloom ?? 0);
+
+    const grainA = (s.grain ?? 0.4) * 0.38;
     if (grainA > 0.01) {
+      ctx.save();
       ctx.globalAlpha = grainA;
+      ctx.globalCompositeOperation = "overlay";
       const ox = Math.random() * 64;
       const oy = Math.random() * 64;
       ctx.fillStyle = ctx.createPattern(this.grain, "repeat");
-      ctx.save();
       ctx.translate(-ox, -oy);
       ctx.fillRect(0, 0, w + 128, h + 128);
       ctx.restore();
-      ctx.globalAlpha = 1;
     }
 
-    const sl = s.scanlines ?? 0.4;
-    if (sl > 0.02) {
-      ctx.fillStyle = `rgba(0,0,0,${0.22 * sl})`;
+    const sln = s.scanlines ?? 0.4;
+    if (sln > 0.02) {
+      ctx.fillStyle = `rgba(0,0,0,${0.28 * sln})`;
       for (let y = 0; y < h; y += 2) ctx.fillRect(0, y, w, 1);
+      if (sln > 0.55) {
+        ctx.fillStyle = `rgba(0,0,0,${0.12 * sln})`;
+        for (let y = 1; y < h; y += 4) ctx.fillRect(0, y, w, 1);
+      }
     }
 
     const vig = s.vignette ?? 0.7;
@@ -253,10 +267,51 @@ export class Preview {
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, w, h);
 
+    this._chroma(ctx, w, h, s.chromatic ?? 0, b.high);
+
     this._text(ctx, w, h, pal);
 
-    const jit = (s.jitter ?? 0.3) * (4 + b.bass * 10);
+    const jit = (s.jitter ?? 0.3) * (5 + b.bass * 12);
     this.canvas.style.transform = `translate(${(Math.random() - 0.5) * jit}px, ${(Math.random() - 0.5) * jit}px)`;
+  }
+
+  _bloom(ctx, w, h, amount) {
+    if (amount < 0.02) return;
+    const buf = this.bloom;
+    const bw = Math.max(2, (w / 2) | 0);
+    const bh = Math.max(2, (h / 2) | 0);
+    if (buf.width !== bw || buf.height !== bh) {
+      buf.width = bw;
+      buf.height = bh;
+    }
+    const bctx = this.bctx;
+    bctx.clearRect(0, 0, bw, bh);
+    bctx.filter = `blur(${3 + amount * 14}px)`;
+    bctx.drawImage(this.canvas, 0, 0, bw, bh);
+    bctx.filter = "none";
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = 0.4 + amount * 1.05;
+    ctx.drawImage(buf, 0, 0, w, h);
+    ctx.restore();
+  }
+
+  _chroma(ctx, w, h, amount, high) {
+    if (amount < 0.02) return;
+    const shift = Math.max(1, Math.round(1 + amount * 8 + high * 2));
+    const buf = this.chroma;
+    if (buf.width !== w || buf.height !== h) {
+      buf.width = w;
+      buf.height = h;
+    }
+    this.cctx.clearRect(0, 0, w, h);
+    this.cctx.drawImage(this.canvas, 0, 0);
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    ctx.globalAlpha = Math.min(0.8, 0.2 + amount * 0.75);
+    ctx.drawImage(buf, -shift, 0);
+    ctx.drawImage(buf, shift, 0);
+    ctx.restore();
   }
 
   _ring(ctx, w, h, b, rgb) {
