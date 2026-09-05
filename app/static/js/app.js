@@ -1,6 +1,6 @@
-import { api, uploadWav } from "./api.js?v=15";
-import { Preview } from "./preview.js?v=15";
-import { Waveform, formatTime } from "./waveform.js?v=15";
+import { api, uploadWav } from "./api.js?v=19";
+import { Preview } from "./preview.js?v=19";
+import { Waveform, formatTime } from "./waveform.js?v=19";
 
 const $ = (id) => document.getElementById(id);
 
@@ -40,6 +40,7 @@ const state = {
     text: "",
     subtext: "",
     text_position: "lower",
+    text_y: 0.86,
     text_size: 0.65,
     text_opacity: 0.92,
     text_glow: 0,
@@ -57,7 +58,29 @@ const state = {
   logoName: "",
   logoNames: {},
   activeClipId: null,
+  safeArea: false,
 };
+
+const SESSION_KEY = "nv-session-v1";
+const LOOKS_KEY = "nv-looks-v1";
+const LOOK_KEYS = [
+  "scene",
+  "bg_color",
+  "effect_color",
+  "text_color",
+  "font",
+  "grain",
+  "jitter",
+  "bloom",
+  "intensity",
+  "glitch",
+  "scanlines",
+  "vignette",
+  "chromatic",
+  "trail",
+  "reactivity",
+  "text_y",
+];
 
 const audioEl = new Audio();
 audioEl.preload = "auto";
@@ -75,6 +98,7 @@ const wave = new Waveform($("wave"), ({ clips, selected }) => {
   renderClipList(clips, selected);
   updatePlayRange();
   syncFadeControls();
+  scheduleSave();
 });
 
 function toast(msg) {
@@ -104,6 +128,114 @@ function seg(container, items, current, onPick, labelKey = "label") {
 function persistClipSettings() {
   const c = wave.selectedClip();
   if (c) c.settings = { ...state.settings };
+  scheduleSave();
+}
+
+function saveSession() {
+  try {
+    localStorage.setItem(
+      SESSION_KEY,
+      JSON.stringify({
+        track_id: state.track?.id || "",
+        settings: state.settings,
+        clips: wave.clips.map((c) => ({
+          id: c.id,
+          start: c.start,
+          end: c.end,
+          fade_in: c.fade_in || 0,
+          fade_out: c.fade_out || 0,
+          reason: c.reason || "",
+          settings: c.settings || null,
+        })),
+        selected: wave.selected,
+        bgNames: state.bgNames,
+        fontNames: state.fontNames,
+        logoNames: state.logoNames,
+        safeArea: Boolean(state.safeArea),
+      })
+    );
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+let _saveTimer = 0;
+function scheduleSave() {
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(saveSession, 250);
+}
+
+function loadUserLooks() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LOOKS_KEY) || "[]");
+    return Array.isArray(raw) ? raw : [];
+  } catch {
+    return [];
+  }
+}
+
+function storeUserLooks(list) {
+  localStorage.setItem(LOOKS_KEY, JSON.stringify(list));
+}
+
+function applyLook(look) {
+  const bundled = Boolean(look.bundled);
+  const src = look.settings || look;
+  const text = state.settings.text;
+  const sub = state.settings.subtext;
+  if (bundled) {
+    for (const k of LOOK_KEYS) {
+      if (src[k] !== undefined) state.settings[k] = src[k];
+    }
+    state.settings.font_id = "";
+    state.settings.text = text;
+    state.settings.subtext = sub;
+  } else {
+    Object.assign(state.settings, src);
+  }
+  afterLookChange();
+  loadPreviewBg(state.settings.background_id);
+  loadPreviewLogo(state.settings.logo_id);
+  if (state.settings.font_id) {
+    installCustomFont(state.settings.font_id, `/api/fonts/${state.settings.font_id}`);
+  }
+  preview.setSettings({ ...state.settings });
+  syncControls();
+}
+
+function paintLooks() {
+  const box = $("looks");
+  if (!box) return;
+  const bundled = state.catalog?.looks || [];
+  const saved = loadUserLooks();
+  const s = state.settings;
+  box.innerHTML = "";
+  const addChip = (look, user) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = look.label || look.id;
+    if (user) b.classList.add("user");
+    const src = look.settings || look;
+    if (src.scene === s.scene && src.effect_color === s.effect_color && src.bg_color === s.bg_color) {
+      b.classList.add("on");
+    }
+    b.addEventListener("click", () => applyLook(look));
+    if (user) {
+      const x = document.createElement("span");
+      x.className = "look-x";
+      x.textContent = "×";
+      x.title = "Remove saved look";
+      x.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        storeUserLooks(loadUserLooks().filter((l) => l.id !== look.id));
+        paintLooks();
+      });
+      b.appendChild(x);
+    }
+    box.appendChild(b);
+  };
+  bundled.forEach((l) => addChip(l, false));
+  saved.forEach((l) => addChip(l, true));
 }
 
 function paintSliderGroup(containerId, list) {
@@ -321,6 +453,7 @@ function paintSwatches() {
 function syncControls() {
   const s = state.settings;
   const c = state.catalog || {};
+  paintLooks();
   paintSwatches();
   bindColor("bg-color", "bg-hex", "bg_color");
   bindColor("effect-color", "effect-hex", "effect_color");
@@ -345,28 +478,20 @@ function syncControls() {
     afterLookChange();
     syncControls();
   });
-  seg(
-    $("textpos"),
-    [
-      { id: "top", label: "Top" },
-      { id: "center", label: "Center" },
-      { id: "lower", label: "Lower" },
-    ],
-    s.text_position,
-    (id) => {
-      s.text_position = id;
-      afterLookChange();
-      syncControls();
-    }
-  );
-
   paintSliderGroup("sliders", c.sliders);
   paintSliderGroup("text-fx", c.text_fx);
   paintSliderGroup("logo-fx", c.logo_fx);
   $("text").value = s.text;
   $("subtext").value = s.subtext;
   $("text-size").value = String(s.text_size);
+  if ($("text-y")) {
+    $("text-y").value = String(s.text_y ?? 0.86);
+    if ($("text-y-val")) $("text-y-val").textContent = Number(s.text_y ?? 0.86).toFixed(2);
+  }
   $("logo-size").value = String(s.logo_size ?? 0.18);
+  const safe = $("safe-area");
+  if (safe) safe.checked = Boolean(state.safeArea);
+  preview.setSafeArea(Boolean(state.safeArea));
   preview.setSettings({ ...s });
   $("stage").dataset.format = s.format;
   const hasBg = Boolean(s.background_id);
@@ -422,11 +547,17 @@ function setWorkspace(on) {
   $("transport").hidden = !on;
 }
 
-async function loadTrack(meta) {
+async function loadTrack(meta, restore) {
   state.track = meta;
   $("track-label").textContent = `${meta.filename}  ·  ${formatTime(meta.duration)}  ·  ${meta.sample_rate} Hz  ·  ${meta.channels}ch`;
   wave.setTrack(meta);
-  wave.fromSuggestions(meta.suggestions || []);
+  if (restore?.clips?.length) {
+    wave.setClips(restore.clips, restore.selected || restore.clips[0].id);
+    state.activeClipId = wave.selected;
+    loadClipSettings(wave.selected);
+  } else {
+    wave.fromSuggestions(meta.suggestions || []);
+  }
   $("stage-empty").hidden = true;
   preview.setSettings(state.settings);
   preview.start();
@@ -443,6 +574,7 @@ async function loadTrack(meta) {
   } catch (err) {
     console.warn(err);
   }
+  scheduleSave();
 }
 
 async function handleFile(file) {
@@ -690,6 +822,12 @@ $("text-size").addEventListener("input", (e) => {
   persistClipSettings();
   preview.setSettings({ ...state.settings });
 });
+$("text-y")?.addEventListener("input", (e) => {
+  state.settings.text_y = Number(e.target.value);
+  if ($("text-y-val")) $("text-y-val").textContent = Number(e.target.value).toFixed(2);
+  persistClipSettings();
+  preview.setSettings({ ...state.settings });
+});
 
 $("add-clip").addEventListener("click", () => {
   const t = audioEl.currentTime || 0;
@@ -776,7 +914,7 @@ function pollJob(id) {
         $("outputs").innerHTML = job.outputs
           .map(
             (o) =>
-              `<a href="/api/jobs/${id}/files/${o.name}" download>${o.name} · ${formatTime(o.start)}–${formatTime(o.end)} · ${(o.bytes / 1e6).toFixed(1)} MB</a>`
+              `<a href="/api/jobs/${id}/files/${encodeURIComponent(o.name)}" download="${o.name}">${o.name} · ${formatTime(o.start)}–${formatTime(o.end)} · ${(o.bytes / 1e6).toFixed(1)} MB</a>`
           )
           .join("");
       }
@@ -798,14 +936,71 @@ function pollJob(id) {
   state.poll = setInterval(tickJob, 600);
 }
 
+async function restoreSession() {
+  let ses;
+  try {
+    ses = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+  } catch {
+    ses = null;
+  }
+  if (!ses) return;
+  if (ses.settings) Object.assign(state.settings, ses.settings);
+  state.safeArea = Boolean(ses.safeArea);
+  state.bgNames = ses.bgNames || {};
+  state.fontNames = ses.fontNames || {};
+  state.logoNames = ses.logoNames || {};
+  if (ses.track_id) {
+    try {
+      const meta = await api(`/api/tracks/${ses.track_id}`);
+      await loadTrack(meta, { clips: ses.clips, selected: ses.selected });
+      return;
+    } catch {
+      /* track expired on disk */
+    }
+  }
+}
+
 async function boot() {
   state.catalog = await api("/api/presets");
   if (state.catalog.defaults) Object.assign(state.settings, state.catalog.defaults);
   installCatalogFonts(state.catalog.fonts);
   preview.setCatalog(state.catalog);
+  await restoreSession();
+  const safe = $("safe-area");
+  if (safe) {
+    safe.checked = Boolean(state.safeArea);
+    preview.setSafeArea(Boolean(state.safeArea));
+  }
   syncControls();
   preview.setSettings(state.settings);
   preview.start();
 }
+
+$("look-save")?.addEventListener("click", () => {
+  const label = ($("look-name")?.value || "").trim();
+  if (!label) {
+    toast("Name the look first");
+    return;
+  }
+  const list = loadUserLooks();
+  const existing = list.find((l) => l.label.toLowerCase() === label.toLowerCase());
+  const entry = {
+    id: existing?.id || `u-${Date.now().toString(16)}`,
+    label,
+    bundled: false,
+    settings: { ...state.settings },
+  };
+  const next = existing ? list.map((l) => (l.id === existing.id ? entry : l)) : [...list, entry];
+  storeUserLooks(next);
+  $("look-name").value = "";
+  paintLooks();
+  toast(`Saved look “${label}”`);
+});
+
+$("safe-area")?.addEventListener("change", (e) => {
+  state.safeArea = Boolean(e.target.checked);
+  preview.setSafeArea(state.safeArea);
+  scheduleSave();
+});
 
 boot().catch((err) => toast(err.message));

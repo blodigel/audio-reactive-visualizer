@@ -72,6 +72,7 @@ def build_text_layer(
     color: tuple[float, float, float],
     font_path: Path | None = None,
     tracking: float = 0.08,
+    y_frac: float | None = None,
 ) -> np.ndarray | None:
     if not text and not subtext:
         return None
@@ -102,12 +103,11 @@ def build_text_layer(
         255,
     )
     shadow = (0, 0, 0, 220)
-    if position == "top":
-        y = int(h * 0.08)
-    elif position == "center":
-        y = int(h * 0.42)
-    else:
-        y = int(h * 0.70)
+    if y_frac is None:
+        y_frac = {"top": 0.12, "center": 0.50, "lower": 0.86}.get(position, 0.86)
+    y_frac = float(np.clip(y_frac, 0.06, 0.94))
+    y = int(h * y_frac)
+    y = max(int(h * 0.05), min(y, h - int(fs * (2.4 if subtext else 1.4))))
 
     if text:
         draw_spaced(y + 3, text, font, shadow, tracking)
@@ -253,6 +253,7 @@ class VisualEngine:
             self.palette["accent"],
             font_path=font_path,
             tracking=tracking,
+            y_frac=float(settings.text_y),
         )
         self.yy, self.xx = np.mgrid[0:height, 0:width].astype(np.float32)
 
@@ -657,7 +658,7 @@ class VisualEngine:
                 self.logo,
                 self.settings.logo_position,
                 float(self.settings.logo_size),
-                self.settings.text_position,
+                float(self.settings.text_y),
             )
             if logo_layer is not None:
                 logo_layer = fx_rgba(

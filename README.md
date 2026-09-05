@@ -14,7 +14,7 @@ Runs locally in Docker. Nothing is uploaded to a third party.
 
 1. Drop a track (**WAV, MP3, FLAC, AIFF, M4A**, …).
 2. See the waveform, onsets, and **suggested cut points**.
-3. Drag, resize, add or remove the bits of the track you want (8–30s, Instagram-friendly). **Each clip has its own look** — select a clip, then change effect, colors, text or background. Add another clip and style it differently.
+3. Drag, resize, add or remove the bits of the track you want (8–30s, Instagram-friendly). **Each clip has its own look** — select a clip, then change effect, colors, text or background. Add another clip and style it differently. Looks can be saved; the last tape is restored after refresh.
 4. Pick **background, effect and text colors** (or a palette swatch). Optionally **import a background image** (AI still, photo, PNG/JPEG/WebP) and set **BG tint** (how hard the background color washes over it). Then ride **grain, jitter, glitch, bloom, scanlines, chroma, trail, reactivity**.
 5. Add **title / subtext** on the frame. Pick a **font** (Archivo, Bebas, metal, glitch, …) or **upload a TTF/OTF**. Optionally **upload a logo** (PNG with transparency) and place it above the text or in a corner. Text and logo have their own **glow / glitch / chroma / jitter**.
 6. Live preview in the browser (reacts to the audio).

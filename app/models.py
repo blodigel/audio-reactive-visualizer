@@ -73,6 +73,7 @@ class VisualSettings(BaseModel):
     text: str = Field(default="", max_length=80)
     subtext: str = Field(default="", max_length=80)
     text_position: TextPosition = "lower"
+    text_y: float = Field(default=0.86, ge=0.06, le=0.94)
     text_size: float = Field(default=0.65, ge=0.2, le=1.5)
     text_opacity: float = Field(default=0.92, ge=0, le=1)
     text_glow: float = Field(default=0.0, ge=0, le=1)

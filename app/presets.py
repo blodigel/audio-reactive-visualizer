@@ -70,6 +70,41 @@ COLOR_PRESETS: list[dict[str, str]] = [
     {"id": "white", "label": "White", "bg_color": "#020202", "effect_color": "#ebebe6", "text_color": "#c4452e"},
 ]
 
+def _pack_look(look_id: str, label: str, scene: SceneId, palette_id: str, **over: Any) -> dict:
+    pal = next(p for p in COLOR_PRESETS if p["id"] == palette_id)
+    packed = {
+        "id": look_id,
+        "label": label,
+        "bundled": True,
+        "scene": scene,
+        "bg_color": pal["bg_color"],
+        "effect_color": pal["effect_color"],
+        "text_color": pal["text_color"],
+        "font": "archivo",
+        "grain": 0.48,
+        "jitter": 0.30,
+        "bloom": 0.22,
+        "intensity": 0.78,
+        "glitch": 0.35,
+        "scanlines": 0.50,
+        "vignette": 0.70,
+        "chromatic": 0.20,
+        "trail": 0.40,
+        "reactivity": 0.88,
+    }
+    packed.update(over)
+    return packed
+
+
+LOOKS: list[dict] = [
+    _pack_look("rust", "Rust", "mixed", "rust", font="archivo", glitch=0.38, grain=0.52),
+    _pack_look("bone", "Bone", "field", "bone", font="bebas", bloom=0.35, grain=0.40),
+    _pack_look("ice", "Ice", "oscilloscope", "ice", font="mono", scanlines=0.62, chromatic=0.28),
+    _pack_look("blood", "Blood", "bars", "blood", font="rocker", intensity=0.88, jitter=0.38),
+    _pack_look("acid", "Acid", "kaleido", "acid", font="glitch", glitch=0.55, trail=0.52),
+]
+
+
 SCENE_META: dict[SceneId, dict[str, str]] = {
     "mixed": {"label": "Mixed", "blurb": "Field + scope + particles."},
     "oscilloscope": {"label": "Scope", "blurb": "Classic waveform trace."},
@@ -184,6 +219,7 @@ def public_catalog() -> dict[str, Any]:
             {"key": "logo_chroma", "label": "Chroma", "blurb": "RGB split on the logo"},
             {"key": "logo_jitter", "label": "Jitter", "blurb": "Shake the logo"},
         ],
+        "looks": LOOKS,
         "fonts": public_fonts(),
         "logo_positions": [
             {"id": "above-text", "label": "Above text"},

@@ -17,6 +17,7 @@ def test_catalog_complete():
     assert "bg_color" in cat["defaults"]
     assert any(s["key"] == "text_glitch" for s in cat["text_fx"])
     assert any(s["key"] == "logo_glow" for s in cat["logo_fx"])
+    assert {lk["id"] for lk in cat["looks"]} >= {"rust", "bone", "ice", "blood", "acid"}
 
 
 def test_hex_and_palette():

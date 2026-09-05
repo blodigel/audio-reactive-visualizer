@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>NOISE/VIZ</title>
     <meta name="description" content="Audio → Instagram-friendly audio-reactive visualizer clips. Built for noise and experimental music." />
-    <link rel="stylesheet" href="/static/css/app.css?v=15" />
+    <link rel="stylesheet" href="/static/css/app.css?v=19" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect fill='%23090807' width='16' height='16'/><rect fill='%23d4523e' x='2' y='7' width='12' height='2'/></svg>" />
   </head>
   <body>
@@ -60,6 +60,14 @@
         <aside class="controls">
           <div id="clip-edit" class="clip-edit">Settings apply to the selected clip</div>
           <div class="ctrl-block">
+            <div class="ctrl-label">Looks</div>
+            <div id="looks" class="seg wrap looks"></div>
+            <div class="bg-import">
+              <input id="look-name" class="field" type="text" maxlength="40" placeholder="name this look" />
+              <button type="button" id="look-save" class="btn btn-sm">Save look</button>
+            </div>
+          </div>
+          <div class="ctrl-block">
             <div class="ctrl-label">Palette</div>
             <div id="swatches" class="swatches"></div>
             <div class="colors">
@@ -100,6 +108,10 @@
               <div id="qualities" class="seg"></div>
             </div>
           </div>
+          <label class="check" title="Dim Instagram chrome in the preview">
+            <input type="checkbox" id="safe-area" />
+            Reels safe area
+          </label>
           <div class="ctrl-block">
             <div class="ctrl-label">Effect settings</div>
             <div id="sliders" class="sliders"></div>
@@ -116,13 +128,16 @@
               <button type="button" id="font-clear" class="btn btn-sm" hidden>Use bundled</button>
               <span id="font-name" class="bg-name"></span>
             </div>
-            <div class="ctrl-row">
-              <div id="textpos" class="seg grow"></div>
-              <label class="mini">
-                size
-                <input id="text-size" type="range" min="0.2" max="1.5" step="0.01" value="0.65" />
-              </label>
+            <div class="slider">
+              <label for="text-y">vertical location</label>
+              <span id="text-y-val" class="val">0.86</span>
+              <input id="text-y" type="range" min="0.06" max="0.94" step="0.01" value="0.86" />
+              <span class="range-ends"><span>top</span><span>bottom</span></span>
             </div>
+            <label class="mini">
+              size
+              <input id="text-size" type="range" min="0.2" max="1.5" step="0.01" value="0.65" />
+            </label>
             <div class="ctrl-label">Text FX</div>
             <div id="text-fx" class="sliders"></div>
           </div>
@@ -204,6 +219,6 @@
       </main>
     </div>
     <div id="toast" class="toast" hidden></div>
-    <script type="module" src="/static/js/app.js?v=15"></script>
+    <script type="module" src="/static/js/app.js?v=19"></script>
   </body>
 </html>

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import logging
 import queue
+import re
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -11,6 +13,25 @@ from app.models import JobFileOut, JobOut, RenderRequest, VisualSettings
 from app.render import RenderError, render_clip
 
 log = logging.getLogger("noiseviz.jobs")
+
+
+def clip_output_name(index: int, settings: VisualSettings, track_filename: str) -> str:
+    def slug(raw: str, limit: int = 48) -> str:
+        cleaned = re.sub(r"[^\w\s.\-–—']+", "", raw or "", flags=re.UNICODE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+        return cleaned[:limit].strip()
+
+    title = slug(settings.text)
+    sub = slug(settings.subtext)
+    if not title:
+        stem = Path(track_filename or "clip").stem
+        title = slug(stem) or "clip"
+    parts = [title]
+    if sub:
+        parts.append(sub)
+    parts.append(f"{index:02d}")
+    name = " – ".join(parts) + ".mp4"
+    return name or f"clip-{index:02d}.mp4"
 
 
 @dataclass
@@ -99,6 +120,14 @@ class JobManager:
         out_dir = config.jobs_dir / job.id
         out_dir.mkdir(parents=True, exist_ok=True)
         settings: VisualSettings = job.request.settings
+        track_name = "clip"
+        meta_path = config.tracks_dir / job.track_id / "meta.json"
+        if meta_path.is_file():
+            try:
+                track_name = json.loads(meta_path.read_text()).get("filename") or track_name
+            except Exception:
+                pass
+        used_names: set[str] = set()
 
         for i, clip in enumerate(clips):
             if job.cancel:
@@ -107,7 +136,11 @@ class JobManager:
                 return
             label = f"clip {i + 1}/{n}"
             job.message = f"Rendering {label}"
-            name = f"clip-{i + 1:02d}.mp4"
+            clip_settings = clip.settings or settings
+            name = clip_output_name(i + 1, clip_settings, track_name)
+            if name in used_names:
+                name = f"{Path(name).stem}-{i + 1}{Path(name).suffix}"
+            used_names.add(name)
             dest = out_dir / name
 
             def on_progress(p: float, msg: str, i=i, label=label) -> None:
@@ -118,7 +151,6 @@ class JobManager:
                 return job.cancel
 
             try:
-                clip_settings = clip.settings or settings
                 info = render_clip(
                     wav_path=job.wav_path,
                     out_path=dest,

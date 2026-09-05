@@ -40,6 +40,7 @@ export class Preview {
     this.overlayFx = document.createElement("canvas");
     this.ofx = this.overlayFx.getContext("2d");
     this.clipFade = null;
+    this.safeArea = false;
     this.particles = Array.from({ length: 120 }, () => ({
       x: Math.random(),
       y: Math.random(),
@@ -79,6 +80,11 @@ export class Preview {
     this.catalog = catalog || null;
   }
 
+  setSafeArea(on) {
+    this.safeArea = Boolean(on);
+    if (this.running) this.draw();
+  }
+
   setClipFade(clip) {
     if (!clip) {
       this.clipFade = null;
@@ -113,6 +119,7 @@ export class Preview {
       s.text,
       s.subtext,
       s.text_position,
+      s.text_y,
       s.text_size,
       s.text_glow,
       s.text_glitch,
@@ -367,6 +374,27 @@ export class Preview {
         ctx.fillStyle = `rgba(0,0,0,${1 - g})`;
         ctx.fillRect(0, 0, w, h);
       }
+    }
+
+    if (this.safeArea) {
+      const fmt = s.format || "reels";
+      const top = fmt === "landscape" ? 0.04 : 0.08;
+      const bottom = fmt === "landscape" ? 0.12 : 0.18;
+      ctx.save();
+      ctx.strokeStyle = "rgba(237, 230, 220, 0.35)";
+      ctx.lineWidth = Math.max(1, w * 0.002);
+      ctx.setLineDash([6, 5]);
+      ctx.beginPath();
+      ctx.moveTo(0, h * top);
+      ctx.lineTo(w, h * top);
+      ctx.moveTo(0, h * (1 - bottom));
+      ctx.lineTo(w, h * (1 - bottom));
+      if (fmt === "reels" || fmt === "portrait") {
+        ctx.moveTo(w * 0.88, h * top);
+        ctx.lineTo(w * 0.88, h * (1 - bottom));
+      }
+      ctx.stroke();
+      ctx.restore();
     }
 
     const jit = (s.jitter ?? 0.3) * (5 + b.bass * 12);
@@ -637,18 +665,17 @@ export class Preview {
     const fam = this._fontFamily(s);
     const track = this._tracking(s);
     ox.textAlign = "center";
+    ox.textBaseline = "top";
     ox.fillStyle = `rgb(${pal.accent[0]},${pal.accent[1]},${pal.accent[2]})`;
     const size = (s.text_size ?? 0.65) * w * 0.06;
     ox.font = `600 ${size}px "${fam}", sans-serif`;
     ox.letterSpacing = `${track}em`;
-    let y = h * 0.72;
-    if (s.text_position === "top") y = h * 0.12;
-    if (s.text_position === "center") y = h * 0.5;
+    let y = h * (s.text_y ?? 0.86);
     if (s.text) ox.fillText(s.text, w / 2, y);
     if (s.subtext) {
       ox.font = `400 ${size * 0.42}px "${fam}", sans-serif`;
       ox.fillStyle = `rgba(${pal.accent[0]},${pal.accent[1]},${pal.accent[2]},0.78)`;
-      ox.fillText(s.subtext, w / 2, y + size * 0.7);
+      ox.fillText(s.subtext, w / 2, y + size * 1.35);
     }
     this._stampOverlay(ctx, w, h, {
       glow: s.text_glow ?? 0,
@@ -683,9 +710,8 @@ export class Preview {
       y = h - lh - my;
     } else if (pos === "above-text") {
       x = (w - lw) / 2;
-      if (s.text_position === "top") y = Math.max(my, h * 0.08 - lh - h * 0.02);
-      else if (s.text_position === "center") y = Math.max(my, h * 0.4 - lh - h * 0.025);
-      else y = Math.max(my, h * 0.68 - lh - h * 0.025);
+      const ty = s.text_y ?? 0.86;
+      y = Math.max(my, h * ty - lh - h * 0.025);
     }
     const ox = this._prepOverlay(w, h);
     ox.drawImage(img, x, y, lw, lh);

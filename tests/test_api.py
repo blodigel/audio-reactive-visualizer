@@ -1,3 +1,14 @@
+from app.jobs import clip_output_name
+from app.models import VisualSettings
+
+
+def test_clip_output_name():
+    s = VisualSettings(text="FOG MARGINS", subtext="Rope")
+    assert clip_output_name(1, s, "song.wav") == "FOG MARGINS – Rope – 01.mp4"
+    s2 = VisualSettings(text="", subtext="")
+    assert clip_output_name(2, s2, "demo.wav") == "demo – 02.mp4"
+
+
 def test_health(client):
     r = client.get("/api/health")
     assert r.status_code == 200

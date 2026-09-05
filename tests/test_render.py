@@ -4,7 +4,7 @@ from app.audio import load_wav, mono, spectral_features
 from app.models import VisualSettings
 from app.presets import SCENE_META, resolved_scene
 from app.render import clamp_fades, fade_gain, render_clip
-from app.viz import VisualEngine
+from app.viz import VisualEngine, build_text_layer
 
 
 def test_engine_all_scenes(wav_path):
@@ -84,3 +84,18 @@ def test_render_with_fades(wav_path, tmp_path):
     assert out.is_file()
     assert out.stat().st_size > 2000
     assert info["frames"] >= 10
+
+
+def _first_ink_row(layer: np.ndarray) -> int:
+    rows = np.where(layer[:, :, 3].max(axis=1) > 10)[0]
+    assert len(rows)
+    return int(rows[0])
+
+
+def test_text_y_moves_block():
+    color = (0.93, 0.90, 0.86)
+    high = build_text_layer(200, 400, "FOG MARGINS", "Rope", "lower", 0.65, color, y_frac=0.20)
+    low = build_text_layer(200, 400, "FOG MARGINS", "Rope", "lower", 0.65, color, y_frac=0.86)
+    assert high is not None and low is not None
+    assert _first_ink_row(low) > _first_ink_row(high) + 150
+    assert VisualSettings().text_y == 0.86
