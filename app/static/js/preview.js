@@ -1,0 +1,359 @@
+const PALETTES = {
+  noise: { bg: [5, 3, 3], fg: [214, 61, 36], accent: [237, 219, 194] },
+  dark_ambient: { bg: [3, 4, 8], fg: [71, 148, 163], accent: [158, 97, 199] },
+  industrial: { bg: [3, 3, 3], fg: [235, 230, 219], accent: [242, 107, 26] },
+  drone: { bg: [3, 4, 5], fg: [140, 158, 148], accent: [199, 184, 122] },
+  black_metal: { bg: [2, 2, 2], fg: [235, 235, 230], accent: [179, 20, 20] },
+  techno: { bg: [3, 3, 5], fg: [51, 235, 224], accent: [235, 46, 158] },
+  experimental: { bg: [4, 3, 6], fg: [140, 242, 102], accent: [242, 89, 217] },
+  shoegaze: { bg: [8, 5, 7], fg: [235, 140, 173], accent: [158, 184, 242] },
+};
+
+export class Preview {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext("2d");
+    this.settings = null;
+    this.audio = null;
+    this.buffer = null;
+    this.actx = null;
+    this.analyser = null;
+    this.srcNode = null;
+    this.running = false;
+    this.grain = this._makeGrain();
+    this.trail = document.createElement("canvas");
+    this.tctx = this.trail.getContext("2d");
+    this.particles = Array.from({ length: 120 }, () => ({
+      x: Math.random(),
+      y: Math.random(),
+      vx: 0,
+      vy: 0,
+    }));
+  }
+
+  _makeGrain() {
+    const c = document.createElement("canvas");
+    c.width = 128;
+    c.height = 128;
+    const x = c.getContext("2d");
+    const img = x.createImageData(128, 128);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const v = Math.random() * 255;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+      img.data[i + 3] = 255;
+    }
+    x.putImageData(img, 0, 0);
+    return c;
+  }
+
+  setSettings(s) {
+    this.settings = s;
+  }
+
+  async attachAudio(audioEl, arrayBuffer) {
+    this.audio = audioEl;
+    if (!this.actx) this.actx = new AudioContext();
+    if (this.actx.state === "suspended") await this.actx.resume();
+    if (!this.buffer) {
+      this.buffer = await this.actx.decodeAudioData(arrayBuffer.slice(0));
+    }
+    if (!this.srcNode) {
+      this.analyser = this.actx.createAnalyser();
+      this.analyser.fftSize = 2048;
+      this.srcNode = this.actx.createMediaElementSource(audioEl);
+      this.srcNode.connect(this.analyser);
+      this.analyser.connect(this.actx.destination);
+    }
+  }
+
+  start() {
+    if (this.running) return;
+    this.running = true;
+    const loop = () => {
+      if (!this.running) return;
+      this.draw();
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  }
+
+  stop() {
+    this.running = false;
+  }
+
+  _size() {
+    const dpr = window.devicePixelRatio || 1;
+    const r = this.canvas.getBoundingClientRect();
+    const w = Math.max(2, Math.floor(r.width * dpr));
+    const h = Math.max(2, Math.floor(r.height * dpr));
+    if (this.canvas.width !== w || this.canvas.height !== h) {
+      this.canvas.width = w;
+      this.canvas.height = h;
+      this.trail.width = w;
+      this.trail.height = h;
+    }
+    return { w, h, dpr };
+  }
+
+  _bands() {
+    if (!this.analyser) {
+      return { freq: new Uint8Array(64), time: new Uint8Array(1024), bass: 0, mid: 0, high: 0, energy: 0 };
+    }
+    const freq = new Uint8Array(this.analyser.frequencyBinCount);
+    const time = new Uint8Array(this.analyser.fftSize);
+    this.analyser.getByteFrequencyData(freq);
+    this.analyser.getByteTimeDomainData(time);
+    const bass = avg(freq, 0, 24) / 255;
+    const mid = avg(freq, 24, 90) / 255;
+    const high = avg(freq, 90, 220) / 255;
+    const energy = bass * 0.45 + mid * 0.35 + high * 0.2;
+    return { freq, time, bass, mid, high, energy };
+  }
+
+  _scopeFromBuffer(n, w, h) {
+    const t = this.audio?.currentTime || 0;
+    const sr = this.buffer?.sampleRate || 44100;
+    const ch0 = this.buffer?.getChannelData(0);
+    const ch1 = this.buffer && this.buffer.numberOfChannels > 1 ? this.buffer.getChannelData(1) : ch0;
+    if (!ch0) return { xs: [], ys: [], lx: [], ly: [] };
+    const center = Math.floor(t * sr);
+    const xs = new Array(n);
+    const ys = new Array(n);
+    const lx = new Array(n);
+    const ly = new Array(n);
+    const amp = 0.28 + 0.2 * (this.settings?.intensity ?? 0.7);
+    for (let i = 0; i < n; i++) {
+      const idx = Math.max(0, Math.min(ch0.length - 1, center - Math.floor(n / 2) + i));
+      const l = ch0[idx] || 0;
+      const r = ch1[idx] || 0;
+      xs[i] = (i / (n - 1)) * w;
+      ys[i] = h * 0.5 - l * h * amp;
+      lx[i] = w * 0.5 + l * w * amp;
+      ly[i] = h * 0.5 + r * h * amp * 0.85;
+    }
+    return { xs, ys, lx, ly };
+  }
+
+  draw() {
+    const { w, h } = this._size();
+    const ctx = this.ctx;
+    const s = this.settings || {};
+    const pal = PALETTES[s.genre] || PALETTES.noise;
+    const b = this._bands();
+    const trail = 0.5 + 0.45 * (s.trail ?? 0.4);
+
+    this.tctx.globalAlpha = trail;
+    this.tctx.drawImage(this.canvas, 0, 0);
+    this.tctx.globalAlpha = 1;
+
+    ctx.fillStyle = `rgb(${pal.bg[0]},${pal.bg[1]},${pal.bg[2]})`;
+    ctx.fillRect(0, 0, w, h);
+
+    const g = ctx.createRadialGradient(w / 2, h / 2, 10, w / 2, h / 2, Math.max(w, h) * 0.7);
+    g.addColorStop(0, `rgba(${pal.fg[0]},${pal.fg[1]},${pal.fg[2]},${0.08 + b.energy * 0.18})`);
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.globalAlpha = 0.72;
+    ctx.drawImage(this.trail, 0, 0);
+    ctx.globalAlpha = 1;
+
+    const scene = s.scene === "auto" ? autoScene(s.genre) : s.scene;
+    const scope = this._scopeFromBuffer(420, w, h);
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+
+    if (scene === "oscilloscope" || scene === "mixed" || scene === "field") {
+      strokePath(ctx, scope.xs, scope.ys, pal.fg, 2 + (s.intensity ?? 0.7) * 2);
+    }
+    if (scene === "lissajous" || scene === "mixed" || scene === "experimental") {
+      strokePath(ctx, scope.lx, scope.ly, pal.accent, 1.8);
+    }
+    if (scene === "spectrum" || scene === "tunnel") {
+      this._ring(ctx, w, h, b, pal.fg);
+    }
+    if (scene === "tunnel") {
+      this._tunnel(ctx, w, h, b, pal);
+    }
+    if (scene === "bars") {
+      this._bars(ctx, w, h, b, pal.fg);
+    }
+    if (scene === "particles" || scene === "mixed" || scene === "shoegaze") {
+      this._particles(ctx, w, h, b, pal.accent);
+    }
+
+    if ((s.glitch ?? 0) > 0.2 && b.energy > 0.55) {
+      const slices = 2 + Math.floor((s.glitch ?? 0) * 6);
+      for (let i = 0; i < slices; i++) {
+        const y = Math.random() * h;
+        const hh = 4 + Math.random() * 18;
+        const dx = (Math.random() - 0.5) * w * 0.08 * (s.glitch ?? 0);
+        ctx.drawImage(this.canvas, 0, y, w, hh, dx, y, w, hh);
+      }
+    }
+
+    const grainA = (s.grain ?? 0.4) * 0.18;
+    if (grainA > 0.01) {
+      ctx.globalAlpha = grainA;
+      const ox = Math.random() * 64;
+      const oy = Math.random() * 64;
+      ctx.fillStyle = ctx.createPattern(this.grain, "repeat");
+      ctx.save();
+      ctx.translate(-ox, -oy);
+      ctx.fillRect(0, 0, w + 128, h + 128);
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+
+    const sl = s.scanlines ?? 0.4;
+    if (sl > 0.02) {
+      ctx.fillStyle = `rgba(0,0,0,${0.22 * sl})`;
+      for (let y = 0; y < h; y += 2) ctx.fillRect(0, y, w, 1);
+    }
+
+    const vig = s.vignette ?? 0.7;
+    const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.2, w / 2, h / 2, Math.max(w, h) * 0.72);
+    vg.addColorStop(0, "rgba(0,0,0,0)");
+    vg.addColorStop(1, `rgba(0,0,0,${0.85 * vig})`);
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, w, h);
+
+    this._text(ctx, w, h, pal);
+
+    const jit = (s.jitter ?? 0.3) * (4 + b.bass * 10);
+    this.canvas.style.transform = `translate(${(Math.random() - 0.5) * jit}px, ${(Math.random() - 0.5) * jit}px)`;
+  }
+
+  _ring(ctx, w, h, b, rgb) {
+    const n = 64;
+    ctx.beginPath();
+    for (let i = 0; i <= n; i++) {
+      const idx = Math.floor((i % n) * (b.freq.length / n));
+      const mag = (b.freq[idx] || 0) / 255;
+      const a = (i / n) * Math.PI * 2;
+      const r = Math.min(w, h) * (0.16 + mag * 0.22 * (this.settings?.intensity ?? 0.7));
+      const x = w / 2 + Math.cos(a) * r;
+      const y = h / 2 + Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.9)`;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  _tunnel(ctx, w, h, b, pal) {
+    const t = this.audio?.currentTime || 0;
+    for (let i = 0; i < 10; i++) {
+      const u = i / 10;
+      const pulse = 0.7 + b.bass * 0.5;
+      ctx.strokeStyle = `rgba(${pal.fg[0]},${pal.fg[1]},${pal.fg[2]},${0.15 + (1 - u) * 0.5})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(
+        w / 2,
+        h / 2,
+        w * (0.08 + u * 0.45) * pulse,
+        h * (0.08 + u * 0.38) * pulse,
+        t * 0.2 + i * 0.08,
+        0,
+        Math.PI * 2
+      );
+      ctx.stroke();
+    }
+  }
+
+  _bars(ctx, w, h, b, rgb) {
+    const n = 48;
+    const step = w / n;
+    ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.85)`;
+    for (let i = 0; i < n; i++) {
+      const idx = Math.floor(i * (b.freq.length / n));
+      const mag = (b.freq[idx] || 0) / 255;
+      const bh = mag * h * 0.45;
+      ctx.fillRect(i * step + 1, h * 0.78 - bh, Math.max(1, step - 2), bh);
+    }
+  }
+
+  _particles(ctx, w, h, b, rgb) {
+    ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.9)`;
+    for (const p of this.particles) {
+      p.vx += (Math.random() - 0.5) * 0.002;
+      p.vy += (Math.random() - 0.5) * 0.002;
+      const dx = p.x - 0.5;
+      const dy = p.y - 0.5;
+      if (b.energy > 0.5) {
+        p.vx += dx * 0.01 * b.energy;
+        p.vy += dy * 0.01 * b.energy;
+      }
+      p.vx *= 0.96;
+      p.vy *= 0.96;
+      p.x = (p.x + p.vx + 1) % 1;
+      p.y = (p.y + p.vy + 1) % 1;
+      ctx.fillRect(p.x * w, p.y * h, 2, 2);
+    }
+  }
+
+  _text(ctx, w, h, pal) {
+    const s = this.settings || {};
+    if (!s.text && !s.subtext) return;
+    ctx.textAlign = "center";
+    ctx.fillStyle = `rgba(${pal.accent[0]},${pal.accent[1]},${pal.accent[2]},${s.text_opacity ?? 0.9})`;
+    const size = (s.text_size ?? 0.65) * w * 0.06;
+    ctx.font = `600 ${size}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.letterSpacing = "0.14em";
+    let y = h * 0.72;
+    if (s.text_position === "top") y = h * 0.12;
+    if (s.text_position === "center") y = h * 0.5;
+    if (s.text) ctx.fillText(s.text, w / 2, y);
+    if (s.subtext) {
+      ctx.font = `400 ${size * 0.42}px ui-monospace, monospace`;
+      ctx.fillStyle = `rgba(${pal.accent[0]},${pal.accent[1]},${pal.accent[2]},0.7)`;
+      ctx.fillText(s.subtext, w / 2, y + size * 0.7);
+    }
+  }
+}
+
+function avg(arr, a, b) {
+  let s = 0;
+  let n = 0;
+  const end = Math.min(arr.length, b);
+  for (let i = a; i < end; i++) {
+    s += arr[i];
+    n++;
+  }
+  return n ? s / n : 0;
+}
+
+function strokePath(ctx, xs, ys, rgb, width) {
+  if (!xs.length) return;
+  ctx.beginPath();
+  ctx.moveTo(xs[0], ys[0]);
+  for (let i = 1; i < xs.length; i++) ctx.lineTo(xs[i], ys[i]);
+  ctx.strokeStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.35)`;
+  ctx.lineWidth = width + 6;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(xs[0], ys[0]);
+  for (let i = 1; i < xs.length; i++) ctx.lineTo(xs[i], ys[i]);
+  ctx.strokeStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+  ctx.lineWidth = width;
+  ctx.stroke();
+}
+
+function autoScene(genre) {
+  return (
+    {
+      noise: "mixed",
+      dark_ambient: "spectrum",
+      industrial: "bars",
+      drone: "field",
+      black_metal: "oscilloscope",
+      techno: "tunnel",
+      experimental: "lissajous",
+      shoegaze: "particles",
+    }[genre] || "mixed"
+  );
+}

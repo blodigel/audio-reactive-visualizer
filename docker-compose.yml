@@ -1,0 +1,14 @@
+services:
+  app:
+    build: .
+    image: ghcr.io/blodigel/noise-visualizer:local
+    ports:
+      - "8080:8080"
+    volumes:
+      - viz-data:/data
+    environment:
+      DATA_DIR: /data
+    restart: unless-stopped
+
+volumes:
+  viz-data:

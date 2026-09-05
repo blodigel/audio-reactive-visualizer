@@ -1,0 +1,23 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libsndfile1 fonts-dejavu-core
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Sync and test
+        run: |
+          uv sync --group dev
+          uv run pytest

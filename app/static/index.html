@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NOISE/VIZ</title>
+    <meta name="description" content="WAV → Instagram-friendly audio-reactive visualizer clips. Built for noise and experimental music." />
+    <link rel="stylesheet" href="/static/css/app.css" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect fill='%23090807' width='16' height='16'/><rect fill='%23d4523e' x='2' y='7' width='12' height='2'/></svg>" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="top">
+        <div class="brand">
+          <span class="brand-name">NOISE<span class="slash">/</span>VIZ</span>
+          <span class="brand-sub">audio-reactive clips</span>
+        </div>
+        <div class="top-meta">
+          <span id="track-label" class="track-label">no tape</span>
+          <span id="job-pill" class="pill">idle</span>
+        </div>
+      </header>
+
+      <section id="drop" class="drop">
+        <input id="file" type="file" accept=".wav,.wave,audio/wav,audio/x-wav" hidden />
+        <div class="drop-inner">
+          <div class="drop-kicker">LOAD WAV</div>
+          <h1>Drop a WAV to cut clips from it.</h1>
+          <p>
+            Built for noise, drone, industrial — dark, grainy, Instagram-length
+            videos that move with the audio. Pick the moments. Tune grain, jitter,
+            glitch. Render.
+          </p>
+          <div class="drop-actions">
+            <button type="button" id="browse" class="btn btn-accent">Choose file</button>
+            <button type="button" id="demo" class="btn">Load demo tape</button>
+          </div>
+          <p class="drop-note">WAV up to 200&nbsp;MB · stereo or mono · local, nothing leaves this machine</p>
+        </div>
+      </section>
+
+      <main id="workspace" class="workspace" hidden>
+        <section class="preview-col">
+          <div class="stage-wrap">
+            <div id="stage" class="stage" data-format="reels">
+              <canvas id="viz"></canvas>
+              <div id="stage-empty" class="stage-empty">waiting for tape</div>
+            </div>
+          </div>
+          <div class="transport">
+            <button type="button" id="play" class="btn">Play</button>
+            <span id="clock" class="clock">0:00.0</span>
+            <label class="check">
+              <input type="checkbox" id="loop" checked />
+              loop clip
+            </label>
+            <span id="format-tag" class="tag">9:16</span>
+          </div>
+        </section>
+
+        <aside class="controls">
+          <div class="ctrl-block">
+            <div class="ctrl-label">Genre</div>
+            <div id="genres" class="seg wrap"></div>
+          </div>
+          <div class="ctrl-block">
+            <div class="ctrl-label">Scene</div>
+            <div id="scenes" class="seg wrap"></div>
+          </div>
+          <div class="ctrl-row">
+            <div class="ctrl-block grow">
+              <div class="ctrl-label">Format</div>
+              <div id="formats" class="seg"></div>
+            </div>
+            <div class="ctrl-block">
+              <div class="ctrl-label">Quality</div>
+              <div id="qualities" class="seg"></div>
+            </div>
+          </div>
+          <div id="sliders" class="sliders"></div>
+          <div class="ctrl-block">
+            <div class="ctrl-label">Text overlay</div>
+            <input id="text" class="field" type="text" maxlength="80" placeholder="TITLE" />
+            <input id="subtext" class="field" type="text" maxlength="80" placeholder="subtext / artist" />
+            <div class="ctrl-row">
+              <div id="textpos" class="seg grow"></div>
+              <label class="mini">
+                size
+                <input id="text-size" type="range" min="0.2" max="1.5" step="0.01" value="0.65" />
+              </label>
+            </div>
+          </div>
+          <div class="render-bar">
+            <button type="button" id="render" class="btn btn-accent btn-block">Render clips</button>
+            <button type="button" id="cancel" class="btn btn-ghost" hidden>Cancel</button>
+            <div id="job-msg" class="job-msg"></div>
+            <div id="outputs" class="outputs"></div>
+          </div>
+        </aside>
+
+        <section class="timeline">
+          <div class="tl-head">
+            <div class="ctrl-label">Tape</div>
+            <div class="tl-tools">
+              <label class="mini">
+                length
+                <select id="clip-len">
+                  <option value="8">8s</option>
+                  <option value="10">10s</option>
+                  <option value="15" selected>15s</option>
+                  <option value="20">20s</option>
+                  <option value="30">30s</option>
+                </select>
+              </label>
+              <label class="mini">
+                count
+                <select id="clip-count">
+                  <option>1</option>
+                  <option>2</option>
+                  <option selected>3</option>
+                  <option>4</option>
+                  <option>5</option>
+                  <option>6</option>
+                </select>
+              </label>
+              <button type="button" id="suggest" class="btn btn-sm">Suggest</button>
+              <button type="button" id="add-clip" class="btn btn-sm">Add clip</button>
+              <button type="button" id="del-clip" class="btn btn-sm">Remove</button>
+              <button type="button" id="replace" class="btn btn-sm">New WAV</button>
+            </div>
+          </div>
+          <div class="wave-wrap">
+            <canvas id="wave"></canvas>
+            <div id="wave-tip" class="wave-tip" hidden></div>
+          </div>
+          <div id="clip-list" class="clip-list"></div>
+        </section>
+      </main>
+    </div>
+    <div id="toast" class="toast" hidden></div>
+    <script type="module" src="/static/js/app.js"></script>
+  </body>
+</html>
