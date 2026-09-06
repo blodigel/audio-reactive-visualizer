@@ -50,6 +50,8 @@ export class Preview {
     this.grain = this._makeGrain();
     this.trail = document.createElement("canvas");
     this.tctx = this.trail.getContext("2d");
+    this.sceneBuf = document.createElement("canvas");
+    this.sceneCtx = this.sceneBuf.getContext("2d");
     this.bloom = document.createElement("canvas");
     this.bctx = this.bloom.getContext("2d");
     this.scratch = document.createElement("canvas");
@@ -64,6 +66,7 @@ export class Preview {
     this._lastDraw = 0;
     this._prevFreq = null;
     this._fluxMax = 1e-3;
+    this._threshFilter = installThresholdFilter(this.bctx);
     this._initParticles();
   }
 
@@ -226,6 +229,8 @@ export class Preview {
       this.canvas.height = h;
       this.trail.width = w;
       this.trail.height = h;
+      this.sceneBuf.width = w;
+      this.sceneBuf.height = h;
       this.scratch.width = w;
       this.scratch.height = h;
     }
@@ -370,40 +375,56 @@ export class Preview {
     ctx.globalAlpha = 1;
     ctx.filter = "none";
 
-    // --- field base (VisualEngine._field) -------------------------------
-    // render: img = live*(0.72 + 0.15*(1-trail)) + trail*decay*0.85, once per
-    // 30 fps frame. The browser draws at whatever rate it likes, so scale the
-    // per-frame gains to elapsed time and keep the same steady state.
+    // --- background + trail + scene (VisualEngine.render_frame) -----------
+    // viz.py: base = field * live_gain/(1-b) (or the photo blend, unscaled);
+    // trail = trail*b + scene; img = base + trail. b is per 30 fps frame, so it
+    // is raised to the number of render frames elapsed since the last draw.
     const now = performance.now();
     const frames = this._lastDraw ? clamp(((now - this._lastDraw) / 1000) * 30, 0.25, 4) : 1;
     this._lastDraw = now;
     const b = clamp(0.5 + 0.45 * trailAmt, 0.45, 0.94) * 0.85;
     const bEff = Math.pow(b, frames);
-    const liveGain = clamp((0.72 + 0.15 * (1 - trailAmt)) * ((1 - bEff) / (1 - b)), 0.05, 1);
+    const liveGain = 0.72 + 0.15 * (1 - trailAmt);
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, w, h);
-    ctx.globalAlpha = liveGain;
-    this._field(ctx, w, h, f, pal, t, s);
-    ctx.globalAlpha = 1;
-    if (trailAmt > 0.02) {
+    if (this.bgImage) {
+      this._field(ctx, w, h, f, pal, t, s);
+    } else {
+      // gain above 1 is applied as repeated additive passes
+      let g = liveGain / (1 - b);
       ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = bEff;
-      ctx.drawImage(this.trail, 0, 0);
+      while (g > 0.01) {
+        ctx.globalAlpha = Math.min(1, g);
+        this._field(ctx, w, h, f, pal, t, s);
+        g -= 1;
+      }
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = "source-over";
     }
 
-    // --- scene layer, additive (img += layer * (0.65 + 0.55*intensity)) --
-    ctx.globalCompositeOperation = "lighter";
-    ctx.lineJoin = "round";
-    ctx.lineCap = "round";
-    this._scene(ctx, w, h, f, pal, t, s, px);
-    ctx.globalCompositeOperation = "source-over";
+    // scene layer on its own transparent buffer (additive like cv2.add)
+    const sc = this.sceneCtx;
+    sc.clearRect(0, 0, w, h);
+    sc.globalCompositeOperation = "lighter";
+    sc.lineJoin = "round";
+    sc.lineCap = "round";
+    this._scene(sc, w, h, f, pal, t, s, px);
+    sc.globalCompositeOperation = "source-over";
 
-    // trail keeps the frame at this point, like self.trail = clip(img)
-    this.tctx.globalCompositeOperation = "copy";
-    this.tctx.drawImage(this.canvas, 0, 0);
-    this.tctx.globalCompositeOperation = "source-over";
+    // trail = trail*b + scene (scene weight compensates for the frame rate)
+    const tc = this.tctx;
+    tc.globalCompositeOperation = "destination-out";
+    tc.fillStyle = `rgba(0,0,0,${1 - bEff})`;
+    tc.fillRect(0, 0, w, h);
+    tc.globalCompositeOperation = "lighter";
+    tc.globalAlpha = Math.min(1, (1 - bEff) / (1 - b));
+    tc.drawImage(this.sceneBuf, 0, 0);
+    tc.globalAlpha = 1;
+    tc.globalCompositeOperation = "source-over";
+
+    ctx.globalCompositeOperation = "lighter";
+    ctx.drawImage(this.trail, 0, 0);
+    ctx.globalCompositeOperation = "source-over";
 
     // --- onset flash ------------------------------------------------------
     if (f.onset > 0.5) {
@@ -459,7 +480,9 @@ export class Preview {
     this._chroma(ctx, w, h, s.chromatic ?? 0, f.high, k);
 
     // --- crush + contrast (LOOK crush 0.08, contrast 1.28) ----------------
-    this._selfFilter(ctx, w, h, "contrast(1.39) brightness(0.94)");
+    // y = ((x-0.08)/0.92 - 0.5)*1.28 + 0.5 = 1.391x - 0.251, which is exactly
+    // contrast(1.565) followed by brightness(0.889); negatives clamp to 0 in both.
+    this._selfFilter(ctx, w, h, "contrast(1.565) brightness(0.889)");
 
     // --- grain tile -------------------------------------------------------
     if (grainAmt > 0.01) {
@@ -530,9 +553,12 @@ export class Preview {
       ctx.fillStyle = rgba(pal.bg);
       ctx.fillRect(0, 0, w, h);
     }
+    // viz.py photo path: live = photo*(1-op) + tint*op + (field - tint)*0.35*(1-0.5*op)
     const washGain = this.bgImage ? 0.35 * (1 - 0.5 * op) : 1;
     const level = (0.42 + 0.7 * (0.4 + f.energy)) * 0.5 * washGain;
-    ctx.fillStyle = rgba(pal.fog, clamp(level * 0.55, 0, 1));
+    ctx.save();
+    if (this.bgImage) ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = rgba(pal.fog, clamp(level * 0.35, 0, 1));
     ctx.fillRect(0, 0, w, h);
     const blobs = 3;
     for (let i = 0; i < blobs; i++) {
@@ -540,7 +566,7 @@ export class Preview {
       const cy = h * (0.5 + 0.34 * Math.cos(t * (0.09 + i * 0.04) + i * 1.3 + f.centroid));
       const r = Math.max(w, h) * (0.35 + 0.15 * Math.sin(t * 0.2 + i));
       const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-      g.addColorStop(0, rgba(pal.fog, clamp(level * 0.9, 0, 1)));
+      g.addColorStop(0, rgba(pal.fog, clamp(level * 0.5, 0, 1)));
       g.addColorStop(1, rgba(pal.fog, 0));
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, w, h);
@@ -555,6 +581,7 @@ export class Preview {
     hg.addColorStop(1, rgba(pal.dim, 0));
     ctx.fillStyle = hg;
     ctx.fillRect(0, horizon - sigma * 2.5, w, sigma * 5);
+    ctx.restore();
   }
 
   _scene(ctx, w, h, f, pal, t, s, px) {
@@ -818,13 +845,16 @@ export class Preview {
     }
     const bctx = this.bctx;
     bctx.clearRect(0, 0, bw, bh);
-    // contrast(2.8) around mid grey mimics mask = clip((gray-0.52)*2.8)
-    bctx.filter = `contrast(2.8) brightness(0.92) blur(${((5 + 16 * amount) * k) / 2}px)`;
+    // viz.py: hi = img * clip((max(rgb) - 0.52) * 2.8), blurred, added * bloom * 1.35.
+    // The SVG filter is clip(2.8*c - 1.456) per channel: zero below 0.52 like the
+    // mask, a little hotter above it, so the add is scaled down to compensate.
+    const blur = `blur(${((5 + 16 * amount) * k) / 2}px)`;
+    bctx.filter = this._threshFilter ? `${this._threshFilter} ${blur}` : `contrast(2.8) brightness(0.6) ${blur}`;
     bctx.drawImage(this.canvas, 0, 0, bw, bh);
     bctx.filter = "none";
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    ctx.globalAlpha = Math.min(1, amount * 1.35);
+    ctx.globalAlpha = Math.min(1, amount * (this._threshFilter ? 1.35 : 1.5));
     ctx.drawImage(buf, 0, 0, w, h);
     ctx.restore();
   }
@@ -846,6 +876,8 @@ export class Preview {
     ctx.restore();
   }
 
+  // viz.py rolls the red channel left and the blue channel right; brightness is
+  // unchanged. Channels are isolated by multiplying with a pure colour.
   _chroma(ctx, w, h, amount, high, k) {
     if (amount < 0.02) return;
     const shift = Math.max(1, Math.round((1 + amount * 7 + high * 2) * k));
@@ -853,11 +885,30 @@ export class Preview {
     sc.globalCompositeOperation = "copy";
     sc.drawImage(this.canvas, 0, 0);
     sc.globalCompositeOperation = "source-over";
+    if (this.overlayFx.width !== w || this.overlayFx.height !== h) {
+      this.overlay.width = w;
+      this.overlay.height = h;
+      this.overlayFx.width = w;
+      this.overlayFx.height = h;
+    }
+    const ch = this.ofx;
+    const isolate = (color) => {
+      ch.globalCompositeOperation = "copy";
+      ch.drawImage(this.scratch, 0, 0);
+      ch.globalCompositeOperation = "multiply";
+      ch.fillStyle = color;
+      ch.fillRect(0, 0, w, h);
+      ch.globalCompositeOperation = "source-over";
+    };
     ctx.save();
-    ctx.globalCompositeOperation = "screen";
-    ctx.globalAlpha = Math.min(0.8, 0.2 + amount * 0.75);
-    ctx.drawImage(this.scratch, -shift, 0);
-    ctx.drawImage(this.scratch, shift, 0);
+    ctx.globalCompositeOperation = "multiply";
+    ctx.fillStyle = "rgb(0,255,0)";
+    ctx.fillRect(0, 0, w, h);
+    ctx.globalCompositeOperation = "lighter";
+    isolate("rgb(255,0,0)");
+    ctx.drawImage(this.overlayFx, -shift, 0);
+    isolate("rgb(0,0,255)");
+    ctx.drawImage(this.overlayFx, shift, 0);
     ctx.restore();
   }
 
@@ -1032,6 +1083,42 @@ export class Preview {
       jitter: s.logo_jitter ?? 0,
       opacity: s.logo_opacity ?? 1,
     }, w / 1080);
+  }
+}
+
+// Inline SVG filter used as a highlight threshold in the bloom pass. Returns the
+// filter string, or "" when this browser's canvas does not accept url() filters.
+function installThresholdFilter(testCtx) {
+  const id = "nv-bloom-thresh";
+  if (!document.getElementById(id)) {
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("width", "0");
+    svg.setAttribute("height", "0");
+    svg.style.position = "absolute";
+    const filter = document.createElementNS(ns, "filter");
+    filter.setAttribute("id", id);
+    filter.setAttribute("color-interpolation-filters", "sRGB");
+    const ct = document.createElementNS(ns, "feComponentTransfer");
+    for (const ch of ["R", "G", "B"]) {
+      const fn = document.createElementNS(ns, `feFunc${ch}`);
+      fn.setAttribute("type", "linear");
+      fn.setAttribute("slope", "2.8");
+      fn.setAttribute("intercept", "-1.456");
+      ct.appendChild(fn);
+    }
+    filter.appendChild(ct);
+    svg.appendChild(filter);
+    document.body.appendChild(svg);
+  }
+  const value = `url(#${id})`;
+  try {
+    testCtx.filter = value;
+    const ok = testCtx.filter !== "none";
+    testCtx.filter = "none";
+    return ok ? value : "";
+  } catch {
+    return "";
   }
 }
 

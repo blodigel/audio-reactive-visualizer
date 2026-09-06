@@ -1,6 +1,6 @@
-import { api, uploadWav } from "./api.js?v=20";
-import { Preview } from "./preview.js?v=20";
-import { Waveform, formatTime } from "./waveform.js?v=20";
+import { api, uploadWav } from "./api.js?v=21";
+import { Preview } from "./preview.js?v=21";
+import { Waveform, formatTime } from "./waveform.js?v=21";
 
 const $ = (id) => document.getElementById(id);
 

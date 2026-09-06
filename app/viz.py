@@ -551,26 +551,34 @@ class VisualEngine:
     def render_frame(self, frame_i: int, fps: int) -> np.ndarray:
         t = self.clip_start + frame_i / float(fps)
         feat = self.features_at(t)
-        decay = 0.50 + 0.45 * float(self.settings.trail)
-        decay = float(np.clip(decay, 0.45, 0.94))
-        img = self.trail * decay
+        trail_amt = float(self.settings.trail)
+        decay = float(np.clip(0.50 + 0.45 * trail_amt, 0.45, 0.94))
+        # Phosphor persistence applies to what the scene draws, not to the
+        # background. Feeding the background through the trail multiplied it by
+        # ~1/(1-b) every frame, which burned an imported photo out to white.
+        b = decay * 0.85  # per-frame trail gain
+        live_gain = 0.72 + 0.15 * (1.0 - trail_amt)
         field = self._field(feat, t)
         if self.bg_photo is not None:
             op = float(np.clip(self.settings.bg_opacity, 0.0, 1.0))
             tint = _rgb(self.palette["bg"])
             wash = field - tint
-            live = self.bg_photo * (1.0 - op) + tint * op
-            live = np.clip(live + wash * 0.35 * (1.0 - 0.5 * op), 0.0, 1.0)
+            base = self.bg_photo * (1.0 - op) + tint * op
+            base = np.clip(base + wash * 0.35 * (1.0 - 0.5 * op), 0.0, 1.0)
         else:
-            live = field
-        img = np.clip(live * (0.72 + 0.15 * (1.0 - self.settings.trail)) + img * 0.85, 0.0, 1.0)
+            # same steady-state level the old feedback loop settled at, so the
+            # dark plasma look is unchanged
+            base = field * (live_gain / (1.0 - b))
 
         layer_bgr = np.zeros((self.h, self.w, 3), dtype=np.uint8)
         self._draw_scene(layer_bgr, feat, t)
         add = layer_bgr[:, :, ::-1].astype(np.float32) / 255.0
-        img = np.clip(img + add * (0.65 + 0.55 * self.settings.intensity), 0.0, 1.5)
+        add *= 0.65 + 0.55 * self.settings.intensity
 
-        self.trail = np.clip(img, 0.0, 1.0)
+        self.trail *= b
+        self.trail += add
+        np.clip(self.trail, 0.0, 1.0, out=self.trail)
+        img = np.clip(base + self.trail, 0.0, 1.5)
 
         # onset flash
         if feat["onset"] > 0.5:
