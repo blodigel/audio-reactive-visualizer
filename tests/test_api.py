@@ -164,3 +164,35 @@ def test_prune_old(tmp_path, monkeypatch):
     assert not old.exists()
     assert new.exists()
     assert prune_old(retention_days=0) == []
+
+
+def test_two_clips_render_in_parallel_and_stay_ordered(client, wav_path):
+    import time
+
+    with wav_path.open("rb") as f:
+        tid = client.post("/api/tracks", files={"file": ("song.wav", f, "audio/wav")}).json()["id"]
+    body = {
+        "track_id": tid,
+        "format": "square",
+        "quality": "draft",
+        "fps": 12,
+        "clips": [
+            {"start": 0.5, "end": 1.2, "settings": {"scene": "bars", "text": "FOG MARGINS", "subtext": "Rope"}},
+            {"start": 3.0, "end": 3.9, "settings": {"scene": "orbits", "text": "FOG MARGINS", "subtext": "Rope"}},
+        ],
+    }
+    job = client.post("/api/jobs", json=body).json()
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        job = client.get(f"/api/jobs/{job['id']}").json()
+        if job["status"] in {"done", "error", "cancelled"}:
+            break
+        time.sleep(0.2)
+    assert job["status"] == "done", job
+    assert [o["clip_index"] for o in job["outputs"]] == [0, 1]
+    assert job["outputs"][0]["name"].endswith("01.mp4")
+    assert job["outputs"][1]["name"].endswith("02.mp4")
+    for o in job["outputs"]:
+        r = client.get(f"/api/jobs/{job['id']}/files/{o['name']}")
+        assert r.status_code == 200
+        assert len(r.content) == o["bytes"] > 1000

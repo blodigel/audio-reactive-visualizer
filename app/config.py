@@ -13,6 +13,8 @@ class AppConfig(BaseSettings):
     ffmpeg: str = "ffmpeg"
     # Tracks and renders untouched for this many days are deleted. 0 disables.
     retention_days: int = 30
+    # Clips rendered in parallel per job (RENDER_WORKERS). 0 = auto: half the cores, 1..4.
+    render_workers: int = 0
 
     @property
     def tracks_dir(self) -> Path:

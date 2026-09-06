@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import multiprocessing as mp
 import queue
 import re
 import threading
@@ -12,7 +13,7 @@ from pathlib import Path
 
 from app.config import config
 from app.models import JobFileOut, JobOut, RenderRequest, VisualSettings
-from app.render import RenderError, render_clip
+from app.render_worker import default_workers, render_clip_process
 from app.storage import prune_old
 
 log = logging.getLogger("noiseviz.jobs")
@@ -248,86 +249,147 @@ class JobManager:
         out_dir.mkdir(parents=True, exist_ok=True)
         settings: VisualSettings = request.settings
         track_name = job.track_name or "clip"
-        used_names: set[str] = set()
 
-        # progress weighted by seconds of video, not by clip count
+        # Output names are decided up front so clip order is stable in the list.
+        names: list[str] = []
+        used: set[str] = set()
+        for i, clip in enumerate(clips):
+            name = clip_output_name(i + 1, clip.settings or settings, track_name)
+            if name in used:
+                name = f"{Path(name).stem}-{i + 1}{Path(name).suffix}"
+            used.add(name)
+            names.append(name)
+
+        # Frames inside a clip are sequential (trail and particles carry state),
+        # but clips are independent, so each clip renders in its own process.
         lengths = [max(0.5, c.end - c.start) for c in clips]
         total_len = sum(lengths) or 1.0
-        done_len = 0.0
+        progress = [0.0] * n
+        results: dict[int, int] = {}
+        failure: tuple[str, str] | None = None
+        workers = max(1, min(default_workers(), n))
+        ctx = mp.get_context("spawn")
+        q = ctx.Queue()
+        cancel = ctx.Event()
+        pending = list(range(n))
+        running: dict[int, mp.process.BaseProcess] = {}
         last_save = 0.0
 
-        for i, clip in enumerate(clips):
-            if job.cancel:
-                job.status = "cancelled"
-                job.message = "Cancelled"
+        def publish() -> None:
+            nonlocal last_save
+            job.progress = sum(p * L for p, L in zip(progress, lengths, strict=True)) / total_len
+            active = sorted(running)
+            if active:
+                label = ", ".join(f"clip {i + 1}" for i in active)
+                job.message = f"Rendering {label} of {n}"
+            now = time.time()
+            if now - last_save > 2.0:
+                last_save = now
                 self._save(job)
-                return
-            label = f"clip {i + 1}/{n}"
-            job.message = f"Rendering {label}"
-            clip_settings = clip.settings or settings
-            name = clip_output_name(i + 1, clip_settings, track_name)
-            if name in used_names:
-                name = f"{Path(name).stem}-{i + 1}{Path(name).suffix}"
-            used_names.add(name)
-            dest = out_dir / name
-            clip_len = lengths[i]
 
-            def on_progress(p: float, msg: str, label=label, clip_len=clip_len) -> None:
-                nonlocal last_save
-                job.progress = (done_len + p * clip_len) / total_len
-                job.message = f"{label} · {msg}"
-                now = time.time()
-                if now - last_save > 2.0:
-                    last_save = now
-                    self._save(job)
+        def start_next() -> None:
+            i = pending.pop(0)
+            clip = clips[i]
+            proc = ctx.Process(
+                target=render_clip_process,
+                name=f"render-{job.id}-{i + 1}",
+                args=(
+                    i,
+                    job.wav_path,
+                    out_dir / names[i],
+                    clip.start,
+                    clip.end,
+                    clip.settings or settings,
+                    clip.fade_in,
+                    clip.fade_out,
+                    request.format,
+                    request.quality,
+                    request.fps,
+                    q,
+                    cancel,
+                ),
+                daemon=True,
+            )
+            proc.start()
+            running[i] = proc
 
-            def should_cancel() -> bool:
-                return job.cancel
-
-            try:
-                info = render_clip(
-                    wav_path=job.wav_path,
-                    out_path=dest,
-                    start=clip.start,
-                    end=clip.end,
-                    settings=clip_settings,
-                    on_progress=on_progress,
-                    should_cancel=should_cancel,
-                    fade_in=clip.fade_in,
-                    fade_out=clip.fade_out,
-                    fmt=request.format,
-                    quality=request.quality,
-                    fps=request.fps,
-                )
-            except RenderError as exc:
+        try:
+            while pending or running:
+                while pending and len(running) < workers and not failure and not job.cancel:
+                    start_next()
+                    publish()
                 if job.cancel:
-                    job.status = "cancelled"
-                    job.message = "Cancelled"
-                else:
-                    job.status = "error"
-                    job.error = str(exc)
-                    job.message = "Failed"
-                    log.warning("job %s failed: %s", job.id, exc)
-                self._save(job)
-                return
+                    cancel.set()
+                try:
+                    msg = q.get(timeout=0.25)
+                except queue.Empty:
+                    msg = None
+                if msg:
+                    kind, i = msg[0], msg[1]
+                    if kind == "progress":
+                        progress[i] = msg[2]
+                    elif kind == "done":
+                        progress[i] = 1.0
+                        results[i] = msg[2]
+                    elif kind in ("cancelled", "error"):
+                        if failure is None and not job.cancel:
+                            failure = (kind, msg[2])
+                            cancel.set()
+                            pending.clear()
+                    publish()
+                # reap exited processes; a silent death counts as an error
+                for i, proc in list(running.items()):
+                    if proc.is_alive():
+                        continue
+                    proc.join(timeout=0)
+                    del running[i]
+                    if i not in results and failure is None and not job.cancel:
+                        if proc.exitcode not in (0, None):
+                            failure = ("error", f"Render process for clip {i + 1} exited with code {proc.exitcode}")
+                            cancel.set()
+                            pending.clear()
+                if job.cancel:
+                    pending.clear()
+        finally:
+            # drain anything still in flight so a late "done" is not lost
+            deadline = time.time() + 5.0
+            while any(p.is_alive() for p in running.values()) and time.time() < deadline:
+                try:
+                    msg = q.get(timeout=0.1)
+                    if msg[0] == "done":
+                        results[msg[1]] = msg[2]
+                except queue.Empty:
+                    pass
+            for proc in running.values():
+                if proc.is_alive():
+                    proc.terminate()
+                proc.join(timeout=2)
+            q.close()
 
+        for i in sorted(results):
             job.outputs.append(
                 JobFileOut(
-                    name=name,
+                    name=names[i],
                     clip_index=i,
-                    start=clip.start,
-                    end=clip.end,
-                    bytes=int(info["bytes"]),
+                    start=clips[i].start,
+                    end=clips[i].end,
+                    bytes=int(results[i]),
                 )
             )
-            done_len += clip_len
-            job.progress = done_len / total_len
-            self._save(job)
 
-        job.status = "done"
-        job.progress = 1.0
-        job.message = f"Done · {len(job.outputs)} clip{'s' if len(job.outputs) != 1 else ''}"
+        if job.cancel:
+            job.status = "cancelled"
+            job.message = "Cancelled"
+        elif failure:
+            kind, reason = failure
+            job.status = "error"
+            job.error = reason
+            job.message = "Failed"
+            log.warning("job %s failed: %s", job.id, reason)
+        else:
+            job.status = "done"
+            job.progress = 1.0
+            job.message = f"Done · {len(job.outputs)} clip{'s' if len(job.outputs) != 1 else ''}"
         self._save(job)
-
 
 manager = JobManager()

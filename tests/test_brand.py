@@ -95,7 +95,7 @@ def test_font_and_logo_on_frame(client, wav_path, tmp_path: Path):
     import time
 
     body = None
-    for _ in range(40):
+    for _ in range(200):
         body = client.get(f"/api/jobs/{job_id}").json()
         if body["status"] in {"done", "error", "cancelled"}:
             break

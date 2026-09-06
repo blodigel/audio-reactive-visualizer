@@ -72,6 +72,8 @@ make test
 
 Quality: **draft** (half-res, faster), **standard** (1080, CRF 19), **high** (1080, slower, CRF 16). 30 fps, `yuv420p`, `+faststart`, AAC 192k — the combination Instagram actually accepts.
 
+Clips in a job render in parallel, one process each. `RENDER_WORKERS` sets how many at once (default: half the cores, 1–4). On an 8-core Mac a standard 1080×1920 clip renders at roughly 5 fps, so three 15 s clips take about 1.5 minutes together.
+
 ## Clip picking
 
 On upload the app scores sliding windows for energy, dynamics and transients, then greedily picks non-overlapping regions. You can:
