@@ -40,6 +40,21 @@ def _hex_color(value: str) -> str:
     return raw.lower()
 
 
+class TextBox(BaseModel):
+    """One line of type. x and y are the center of the line, as fractions of the frame."""
+
+    on: bool = True
+    text: str = Field(default="", max_length=80)
+    x: float = Field(default=0.5, ge=0.02, le=0.98)
+    y: float = Field(default=0.5, ge=0.02, le=0.98)
+    size: float = Field(default=0.65, ge=0.15, le=1.5)
+
+    @field_validator("text")
+    @classmethod
+    def strip_text(cls, v: str) -> str:
+        return v.strip()
+
+
 class VisualSettings(BaseModel):
     scene: SceneId = "mixed"
     bg_color: str = "#050303"
@@ -57,6 +72,13 @@ class VisualSettings(BaseModel):
     logo_chroma: float = Field(default=0.0, ge=0, le=1)
     logo_jitter: float = Field(default=0.0, ge=0, le=1)
     bg_opacity: float = Field(default=0.22, ge=0, le=1)
+    bg_blur: float = Field(default=0.0, ge=0, le=1)
+    bg_brightness: float = Field(default=0.5, ge=0, le=1)
+    bg_saturation: float = Field(default=1.0, ge=0, le=1)
+    bg_grain: float = Field(default=0.0, ge=0, le=1)
+    bg_glitch: float = Field(default=0.0, ge=0, le=1)
+    bg_scanlines: float = Field(default=0.0, ge=0, le=1)
+    bg_chroma: float = Field(default=0.0, ge=0, le=1)
     grain: float = Field(default=0.45, ge=0, le=1)
     jitter: float = Field(default=0.30, ge=0, le=1)
     bloom: float = Field(default=0.25, ge=0, le=1)
@@ -72,6 +94,8 @@ class VisualSettings(BaseModel):
     text_position: TextPosition = "lower"
     text_y: float = Field(default=0.86, ge=0.06, le=0.94)
     text_size: float = Field(default=0.65, ge=0.2, le=1.5)
+    # Empty means the legacy stacked title + subtext. The editor always sends six boxes.
+    text_boxes: list[TextBox] = Field(default_factory=list, max_length=6)
     text_opacity: float = Field(default=0.92, ge=0, le=1)
     text_glow: float = Field(default=0.0, ge=0, le=1)
     text_glitch: float = Field(default=0.0, ge=0, le=1)
@@ -106,6 +130,22 @@ class VisualSettings(BaseModel):
         if raw in FONT_IDS or raw == "custom":
             return raw
         raise ValueError("Unknown font")
+
+    @model_validator(mode="after")
+    def mirror_primary_text(self) -> VisualSettings:
+        """Title and subtext stay filled in so filenames and old readers still see them."""
+        boxes = self.text_boxes
+        if not boxes:
+            return self
+        first = boxes[0]
+        self.text = first.text
+        self.text_y = float(min(0.94, max(0.06, first.y)))
+        self.text_size = float(min(1.5, max(0.2, first.size)))
+        if len(boxes) > 1 and boxes[1].on:
+            self.subtext = boxes[1].text
+        else:
+            self.subtext = ""
+        return self
 
 
 class ClipIn(BaseModel):

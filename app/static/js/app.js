@@ -1,6 +1,6 @@
-import { api, uploadWav } from "./api.js?v=21";
-import { Preview } from "./preview.js?v=21";
-import { Waveform, formatTime } from "./waveform.js?v=21";
+import { api, uploadWav } from "./api.js?v=26";
+import { Preview } from "./preview.js?v=26";
+import { Waveform, formatTime } from "./waveform.js?v=26";
 
 const $ = (id) => document.getElementById(id);
 
@@ -24,6 +24,13 @@ const state = {
     logo_chroma: 0,
     logo_jitter: 0,
     bg_opacity: 0.22,
+    bg_blur: 0,
+    bg_brightness: 0.5,
+    bg_saturation: 1,
+    bg_grain: 0,
+    bg_glitch: 0,
+    bg_scanlines: 0,
+    bg_chroma: 0,
     grain: 0.48,
     jitter: 0.32,
     bloom: 0.22,
@@ -51,7 +58,10 @@ const state = {
   job: null,
   poll: null,
   bgName: "",
+  bgKind: "",
   bgNames: {},
+  bgKinds: {},
+  textFocus: -1,
   fontName: "",
   fontNames: {},
   logoName: "",
@@ -71,6 +81,13 @@ const LOOK_KEYS = [
   "text_color",
   "background_id",
   "bg_opacity",
+  "bg_blur",
+  "bg_brightness",
+  "bg_saturation",
+  "bg_grain",
+  "bg_glitch",
+  "bg_scanlines",
+  "bg_chroma",
   "font",
   "font_id",
   "grain",
@@ -104,7 +121,90 @@ const OUTPUT_KEYS = ["format", "quality", "fps"];
 function lookOf(settings) {
   const out = {};
   for (const k of LOOK_KEYS) if (settings[k] !== undefined) out[k] = settings[k];
+  if (Array.isArray(settings.text_boxes)) {
+    out.text_layout = settings.text_boxes.map((b) => ({
+      on: Boolean(b.on),
+      x: b.x,
+      y: b.y,
+      size: b.size,
+    }));
+  }
   return out;
+}
+
+const TEXT_BOX_COUNT = 6;
+const TEXT_BOX_SEED = [
+  { on: true, x: 0.5, y: 0.86, size: 0.65 },
+  { on: true, x: 0.5, y: 0.94, size: 0.28 },
+  { on: false, x: 0.5, y: 0.16, size: 0.55 },
+  { on: false, x: 0.5, y: 0.5, size: 0.55 },
+  { on: false, x: 0.22, y: 0.78, size: 0.4 },
+  { on: false, x: 0.78, y: 0.78, size: 0.4 },
+];
+const TEXT_BOX_LABELS = ["Title", "Subtext", "Text 3", "Text 4", "Text 5", "Text 6"];
+
+function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, Number(v)));
+}
+
+function ensureBgFx(s) {
+  if (!s) return;
+  if (s.bg_blur == null) s.bg_blur = 0;
+  if (s.bg_brightness == null) s.bg_brightness = 0.5;
+  if (s.bg_saturation == null) s.bg_saturation = 1;
+  if (s.bg_grain == null) s.bg_grain = 0;
+  if (s.bg_glitch == null) s.bg_glitch = 0;
+  if (s.bg_scanlines == null) s.bg_scanlines = 0;
+  if (s.bg_chroma == null) s.bg_chroma = 0;
+}
+
+function ensureTextBoxes(s) {
+  if (!s) return s;
+  const existing = Array.isArray(s.text_boxes) ? s.text_boxes : null;
+  if (!existing || !existing.length) {
+    const y = clamp(s.text_y ?? 0.86, 0.02, 0.98);
+    s.text_boxes = TEXT_BOX_SEED.map((seed, i) => ({
+      on: i < 2 ? true : seed.on,
+      text: i === 0 ? String(s.text || "") : i === 1 ? String(s.subtext || "") : "",
+      x: seed.x,
+      y: i === 0 ? y : i === 1 ? Math.min(0.98, y + 0.08) : seed.y,
+      size: i === 0 ? clamp(s.text_size ?? seed.size, 0.15, 1.5) : seed.size,
+    }));
+    return s;
+  }
+  const boxes = existing.slice(0, TEXT_BOX_COUNT);
+  while (boxes.length < TEXT_BOX_COUNT) {
+    const seed = TEXT_BOX_SEED[boxes.length];
+    boxes.push({ on: boxes.length < 2, text: "", x: seed.x, y: seed.y, size: seed.size });
+  }
+  for (let i = 0; i < boxes.length; i++) {
+    const b = boxes[i] || {};
+    const seed = TEXT_BOX_SEED[i];
+    boxes[i] = {
+      on: i < 2 ? true : b.on !== undefined ? Boolean(b.on) : seed.on,
+      text: String(b.text || ""),
+      x: clamp(b.x ?? seed.x, 0.02, 0.98),
+      y: clamp(b.y ?? seed.y, 0.02, 0.98),
+      size: clamp(b.size ?? seed.size, 0.15, 1.5),
+    };
+  }
+  s.text_boxes = boxes;
+  return s;
+}
+
+function mirrorPrimary(s) {
+  const boxes = s?.text_boxes;
+  if (!boxes?.length) return;
+  s.text = boxes[0].text || "";
+  s.subtext = boxes[1]?.on ? boxes[1].text || "" : "";
+  s.text_y = clamp(boxes[0].y, 0.06, 0.94);
+  s.text_size = clamp(boxes[0].size, 0.2, 1.5);
+}
+
+function cloneSettings(s) {
+  const copy = { ...s };
+  if (Array.isArray(s?.text_boxes)) copy.text_boxes = s.text_boxes.map((b) => ({ ...b }));
+  return copy;
 }
 
 function stripOutput(settings) {
@@ -119,12 +219,12 @@ const preview = new Preview($("viz"));
 const wave = new Waveform($("wave"), ({ clips, selected }) => {
   if (selected !== state.activeClipId) {
     const prev = wave.clips.find((c) => c.id === state.activeClipId);
-    if (prev) prev.settings = { ...state.settings };
+    if (prev) prev.settings = cloneSettings(state.settings);
     state.activeClipId = selected;
     loadClipSettings(selected);
   }
   for (const c of clips) {
-    if (!c.settings) c.settings = { ...state.settings };
+    if (!c.settings) c.settings = cloneSettings(state.settings);
   }
   renderClipList(clips, selected);
   updatePlayRange();
@@ -157,8 +257,9 @@ function seg(container, items, current, onPick, labelKey = "label") {
 }
 
 function persistClipSettings() {
+  mirrorPrimary(state.settings);
   const c = wave.selectedClip();
-  if (c) c.settings = { ...state.settings };
+  if (c) c.settings = cloneSettings(state.settings);
   scheduleSave();
 }
 
@@ -182,6 +283,7 @@ function saveSession() {
         })),
         selected: wave.selected,
         bgNames: state.bgNames,
+        bgKinds: state.bgKinds,
         fontNames: state.fontNames,
         logoNames: state.logoNames,
         safeArea: Boolean(state.safeArea),
@@ -217,9 +319,26 @@ function applyLook(look) {
   for (const k of LOOK_KEYS) {
     if (src[k] !== undefined) state.settings[k] = src[k];
   }
+  ensureTextBoxes(state.settings);
+  if (Array.isArray(src.text_layout) && src.text_layout.length) {
+    src.text_layout.forEach((lay, i) => {
+      const b = state.settings.text_boxes[i];
+      if (!b || !lay) return;
+      if (i >= 2 && lay.on !== undefined) b.on = Boolean(lay.on);
+      if (lay.x !== undefined) b.x = clamp(lay.x, 0.02, 0.98);
+      if (lay.y !== undefined) b.y = clamp(lay.y, 0.02, 0.98);
+      if (lay.size !== undefined) b.size = clamp(lay.size, 0.15, 1.5);
+    });
+  } else {
+    const b = state.settings.text_boxes[0];
+    if (src.text_y !== undefined) b.y = clamp(src.text_y, 0.02, 0.98);
+    if (src.text_size !== undefined) b.size = clamp(src.text_size, 0.15, 1.5);
+  }
+  mirrorPrimary(state.settings);
   // bundled looks name a bundled font; a lingering custom upload must not win
   if (bundled) state.settings.font_id = "";
-  state.bgName = state.bgNames[state.settings.background_id] || (state.settings.background_id ? "custom image" : "");
+  state.bgKind = state.bgKinds[state.settings.background_id] || "";
+  state.bgName = state.bgNames[state.settings.background_id] || (state.settings.background_id ? "background" : "");
   state.fontName = state.fontNames[state.settings.font_id] || (state.settings.font_id ? "custom font" : "");
   afterLookChange();
   loadPreviewBg(state.settings.background_id);
@@ -355,9 +474,13 @@ function loadClipSettings(id) {
     if (label) label.textContent = "Settings apply to the selected clip";
     return;
   }
-  if (!c.settings) c.settings = { ...state.settings };
-  else Object.assign(state.settings, stripOutput(c.settings));
-  state.bgName = state.bgNames[state.settings.background_id] || (state.settings.background_id ? "custom image" : "");
+  if (!c.settings) c.settings = cloneSettings(state.settings);
+  ensureTextBoxes(c.settings);
+  Object.assign(state.settings, stripOutput(cloneSettings(c.settings)));
+  ensureTextBoxes(state.settings);
+  mirrorPrimary(state.settings);
+  state.bgKind = state.bgKinds[state.settings.background_id] || "";
+  state.bgName = state.bgNames[state.settings.background_id] || (state.settings.background_id ? "background" : "");
   state.fontName = state.fontNames[state.settings.font_id] || (state.settings.font_id ? "custom font" : "");
   state.logoName = state.logoNames[state.settings.logo_id] || (state.settings.logo_id ? "logo" : "");
   const idx = wave.clips.indexOf(c) + 1;
@@ -506,16 +629,15 @@ function syncControls() {
     scheduleSave();
     syncControls();
   });
-  paintSliderGroup("sliders", c.sliders);
+  ensureBgFx(s);
+  paintSliderGroup("bg-sliders", c.bg_sliders);
+  paintSliderGroup("viz-sliders", c.viz_sliders);
   paintSliderGroup("text-fx", c.text_fx);
   paintSliderGroup("logo-fx", c.logo_fx);
-  $("text").value = s.text;
-  $("subtext").value = s.subtext;
-  $("text-size").value = String(s.text_size);
-  if ($("text-y")) {
-    $("text-y").value = String(s.text_y ?? 0.86);
-    if ($("text-y-val")) $("text-y-val").textContent = Number(s.text_y ?? 0.86).toFixed(2);
-  }
+  ensureTextBoxes(s);
+  mirrorPrimary(s);
+  paintTextBoxes();
+  preview.setTextFocus(state.textFocus);
   $("logo-size").value = String(s.logo_size ?? 0.18);
   const safe = $("safe-area");
   if (safe) safe.checked = Boolean(state.safeArea);
@@ -527,7 +649,7 @@ function syncControls() {
   if ($("format-tag")) $("format-tag").textContent = fmtMeta?.ratio || state.output.format;
   const hasBg = Boolean(s.background_id);
   $("bg-clear").hidden = !hasBg;
-  $("bg-name").textContent = hasBg ? state.bgName || "custom image" : "";
+  $("bg-name").textContent = hasBg ? state.bgName || (state.bgKind === "video" ? "video" : "image") : "";
   const hasFont = Boolean(s.font_id);
   $("font-clear").hidden = !hasFont;
   $("font-name").textContent = hasFont ? state.fontName || "custom font" : "";
@@ -632,15 +754,39 @@ function currentClipWindow() {
   return { start: 0, end: state.track?.duration || 0 };
 }
 
-function loadPreviewBg(id) {
+let bgToken = 0;
+async function loadPreviewBg(id) {
+  const token = ++bgToken;
   if (!id) {
+    state.bgKind = "";
     preview.setBackground(null);
     return;
   }
-  const img = new Image();
-  img.onload = () => preview.setBackground(img);
-  img.onerror = () => toast("Could not load background image");
-  img.src = `/api/backgrounds/${id}`;
+  let kind = state.bgKinds[id] || "";
+  if (!kind) {
+    try {
+      const meta = await api(`/api/backgrounds/${id}/meta`);
+      if (token !== bgToken) return;
+      kind = meta.kind || "image";
+      state.bgKinds[id] = kind;
+      if (meta.filename && !state.bgNames[id]) state.bgNames[id] = meta.filename;
+    } catch {
+      kind = "image";
+    }
+  }
+  if (token !== bgToken) return;
+  state.bgKind = kind;
+  if (kind === "video") {
+    preview.setVideoBackground(`/api/backgrounds/${id}/video`);
+  } else {
+    const img = new Image();
+    img.onload = () => {
+      if (token !== bgToken) return;
+      preview.setBackground(img);
+    };
+    img.onerror = () => toast("Could not load background image");
+    img.src = `/api/backgrounds/${id}`;
+  }
 }
 
 function loadPreviewLogo(id) {
@@ -664,7 +810,9 @@ $("bg-file").addEventListener("change", async (e) => {
     fd.append("file", file);
     const meta = await api("/api/backgrounds", { method: "POST", body: fd });
     state.settings.background_id = meta.id;
-    state.bgName = meta.filename || "custom image";
+    state.bgKind = meta.kind || "image";
+    state.bgKinds[meta.id] = state.bgKind;
+    state.bgName = meta.filename || (state.bgKind === "video" ? "video" : "image");
     state.bgNames[meta.id] = state.bgName;
     loadPreviewBg(meta.id);
     persistClipSettings();
@@ -676,6 +824,7 @@ $("bg-file").addEventListener("change", async (e) => {
 $("bg-clear").addEventListener("click", () => {
   state.settings.background_id = "";
   state.bgName = "";
+  state.bgKind = "";
   preview.setBackground(null);
   persistClipSettings();
   syncControls();
@@ -838,27 +987,166 @@ function bindFadeSlider(id, key, valId) {
 bindFadeSlider("fade-in", "fade_in", "fade-in-val");
 bindFadeSlider("fade-out", "fade_out", "fade-out-val");
 
-$("text").addEventListener("input", (e) => {
-  state.settings.text = e.target.value;
+function focusTextBox(i) {
+  state.textFocus = i;
+  preview.setTextFocus(i);
+  document.querySelectorAll(".text-box").forEach((el) => {
+    el.classList.toggle("on", Number(el.dataset.i) === i);
+  });
+}
+
+function updateTextReadout(i) {
+  const row = document.querySelector(`.text-box[data-i="${i}"]`);
+  const b = state.settings.text_boxes?.[i];
+  if (!row || !b) return;
+  for (const key of ["x", "y", "size"]) {
+    const input = row.querySelector(`input[data-k="${key}"]`);
+    const val = row.querySelector(`[data-val="${key}"]`);
+    if (input && document.activeElement !== input) input.value = String(b[key]);
+    if (val) val.textContent = Number(b[key]).toFixed(2);
+  }
+}
+
+function paintTextBoxes() {
+  const host = $("text-boxes");
+  if (!host) return;
+  ensureTextBoxes(state.settings);
+  const boxes = state.settings.text_boxes;
+  host.innerHTML = "";
+  boxes.forEach((b, i) => {
+    if (i >= 2 && !b.on) return;
+    const row = document.createElement("div");
+    row.className = "text-box" + (i === state.textFocus ? " on" : "");
+    row.dataset.i = String(i);
+    const head = document.createElement("div");
+    head.className = "text-box-head";
+    const label = document.createElement("span");
+    label.textContent = TEXT_BOX_LABELS[i] || `Text ${i + 1}`;
+    head.appendChild(label);
+    if (i >= 2) {
+      const hide = document.createElement("button");
+      hide.type = "button";
+      hide.className = "btn btn-sm";
+      hide.textContent = "Hide";
+      hide.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        b.on = false;
+        if (state.textFocus === i) state.textFocus = 0;
+        mirrorPrimary(state.settings);
+        persistClipSettings();
+        preview.setTextFocus(state.textFocus);
+        preview.setSettings(state.settings);
+        paintTextBoxes();
+      });
+      head.appendChild(hide);
+    }
+    row.appendChild(head);
+    const field = document.createElement("input");
+    field.className = "field";
+    field.type = "text";
+    field.maxLength = 80;
+    field.placeholder = i === 0 ? "TITLE" : i === 1 ? "subtext / artist" : "text";
+    field.value = b.text || "";
+    field.addEventListener("focus", () => focusTextBox(i));
+    field.addEventListener("input", () => {
+      b.text = field.value;
+      mirrorPrimary(state.settings);
+      persistClipSettings();
+      preview.setSettings(state.settings);
+    });
+    row.appendChild(field);
+    const axes = document.createElement("div");
+    axes.className = "text-axes";
+    for (const key of [
+      ["x", 0.02, 0.98],
+      ["y", 0.02, 0.98],
+      ["size", 0.15, 1.5],
+    ]) {
+      const [name, min, max] = key;
+      const lab = document.createElement("label");
+      lab.className = "mini";
+      lab.innerHTML = `<span class="text-axis-name">${name} <b data-val="${name}">${Number(b[name]).toFixed(2)}</b></span>`;
+      const input = document.createElement("input");
+      input.type = "range";
+      input.min = String(min);
+      input.max = String(max);
+      input.step = "0.01";
+      input.dataset.k = name;
+      input.value = String(b[name]);
+      input.addEventListener("pointerdown", () => focusTextBox(i));
+      input.addEventListener("input", () => {
+        b[name] = Number(input.value);
+        const val = lab.querySelector(`[data-val="${name}"]`);
+        if (val) val.textContent = Number(b[name]).toFixed(2);
+        mirrorPrimary(state.settings);
+        persistClipSettings();
+        preview.setSettings(state.settings);
+      });
+      lab.appendChild(input);
+      axes.appendChild(lab);
+    }
+    row.appendChild(axes);
+    row.addEventListener("pointerdown", () => focusTextBox(i));
+    host.appendChild(row);
+  });
+  const add = $("text-add");
+  if (add) add.hidden = !boxes.some((b, i) => i >= 2 && !b.on);
+}
+
+$("text-add")?.addEventListener("click", () => {
+  ensureTextBoxes(state.settings);
+  const i = state.settings.text_boxes.findIndex((b, idx) => idx >= 2 && !b.on);
+  if (i < 0) return;
+  state.settings.text_boxes[i].on = true;
+  state.textFocus = i;
+  mirrorPrimary(state.settings);
   persistClipSettings();
-  preview.setSettings({ ...state.settings });
+  preview.setTextFocus(i);
+  preview.setSettings(state.settings);
+  paintTextBoxes();
 });
-$("subtext").addEventListener("input", (e) => {
-  state.settings.subtext = e.target.value;
+
+const vizCanvas = $("viz");
+let textDrag = null;
+function canvasNorm(e) {
+  const r = vizCanvas.getBoundingClientRect();
+  if (r.width < 1 || r.height < 1) return { x: 0.5, y: 0.5 };
+  return {
+    x: (e.clientX - r.left) / r.width,
+    y: (e.clientY - r.top) / r.height,
+  };
+}
+vizCanvas.addEventListener("pointerdown", (e) => {
+  const p = canvasNorm(e);
+  const hit = preview.hitText(p.x, p.y);
+  if (hit < 0) return;
+  textDrag = hit;
+  focusTextBox(hit);
+  try { vizCanvas.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
+  vizCanvas.style.cursor = "grabbing";
+  e.preventDefault();
+});
+vizCanvas.addEventListener("pointermove", (e) => {
+  const p = canvasNorm(e);
+  if (textDrag == null) {
+    vizCanvas.style.cursor = preview.hitText(p.x, p.y) >= 0 ? "grab" : "";
+    return;
+  }
+  const b = state.settings.text_boxes[textDrag];
+  if (!b) return;
+  b.x = clamp(p.x, 0.02, 0.98);
+  b.y = clamp(p.y, 0.02, 0.98);
+  updateTextReadout(textDrag);
+  mirrorPrimary(state.settings);
   persistClipSettings();
-  preview.setSettings({ ...state.settings });
+  preview.setSettings(state.settings);
 });
-$("text-size").addEventListener("input", (e) => {
-  state.settings.text_size = Number(e.target.value);
-  persistClipSettings();
-  preview.setSettings({ ...state.settings });
-});
-$("text-y")?.addEventListener("input", (e) => {
-  state.settings.text_y = Number(e.target.value);
-  if ($("text-y-val")) $("text-y-val").textContent = Number(e.target.value).toFixed(2);
-  persistClipSettings();
-  preview.setSettings({ ...state.settings });
-});
+function endTextDrag() {
+  textDrag = null;
+  vizCanvas.style.cursor = "";
+}
+vizCanvas.addEventListener("pointerup", endTextDrag);
+vizCanvas.addEventListener("pointercancel", endTextDrag);
 
 $("add-clip").addEventListener("click", () => {
   const t = audioEl.currentTime || 0;
@@ -912,9 +1200,9 @@ $("render").addEventListener("click", async () => {
           end: c.end,
           fade_in: c.fade_in || 0,
           fade_out: c.fade_out || 0,
-          settings: stripOutput({ ...(c.settings || state.settings) }),
+          settings: stripOutput(cloneSettings(c.settings || state.settings)),
         })),
-        settings: stripOutput({ ...state.settings }),
+        settings: stripOutput(cloneSettings(state.settings)),
       }),
     });
     state.job = job;
@@ -1019,15 +1307,21 @@ async function restoreSession() {
   }
   if (!ses) return;
   if (ses.settings) Object.assign(state.settings, ses.settings);
+  ensureTextBoxes(state.settings);
+  mirrorPrimary(state.settings);
   // sessions saved before output moved to the job carry format inside settings
   for (const k of OUTPUT_KEYS) {
     if (ses.settings?.[k] !== undefined && !ses.output) state.output[k] = ses.settings[k];
   }
   if (ses.output) Object.assign(state.output, ses.output);
   stripOutput(state.settings);
-  for (const c of ses.clips || []) stripOutput(c.settings);
+  for (const c of ses.clips || []) {
+    stripOutput(c.settings);
+    if (c.settings) ensureTextBoxes(c.settings);
+  }
   state.safeArea = Boolean(ses.safeArea);
   state.bgNames = ses.bgNames || {};
+  state.bgKinds = ses.bgKinds || {};
   state.fontNames = ses.fontNames || {};
   state.logoNames = ses.logoNames || {};
   if (ses.track_id) {
@@ -1059,6 +1353,8 @@ async function boot() {
   installCatalogFonts(state.catalog.fonts);
   preview.setCatalog(state.catalog);
   await restoreSession();
+  ensureTextBoxes(state.settings);
+  mirrorPrimary(state.settings);
   const safe = $("safe-area");
   if (safe) {
     safe.checked = Boolean(state.safeArea);

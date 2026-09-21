@@ -13,7 +13,7 @@ import numpy as np
 from app.audio import load_wav, spectral_features, mono
 from app.config import config
 from app.models import FormatId, QualityId, VisualSettings
-from app.backgrounds import load_cover
+from app.backgrounds import open_background
 from app.logos import load_logo
 from app.presets import QUALITY_CRF, QUALITY_PRESET, output_size
 from app.viz import VisualEngine
@@ -91,7 +91,7 @@ def render_clip(
     fps = int(fps)
     w, h = output_size(fmt, quality)
     spec = spectral_features(mono(data), sr, fps=fps)
-    bg = load_cover(settings.background_id, w, h)
+    bg = open_background(settings.background_id, w, h)
     logo = load_logo(settings.logo_id)
     engine = VisualEngine(data, sr, spec, settings, w, h, start, background=bg, logo=logo)
     n_frames = max(1, int(round(duration * fps)))
@@ -205,6 +205,8 @@ def render_clip(
     except Exception:
         _stop(proc)
         raise
+    finally:
+        engine.close()
 
     code = proc.wait(timeout=120)
     drainer.join(timeout=2)

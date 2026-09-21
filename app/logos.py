@@ -47,6 +47,7 @@ def logo_xy(
     logo_h: int,
     position: str,
     text_y: float = 0.86,
+    text_x: float = 0.5,
 ) -> tuple[int, int]:
     mx = int(frame_w * 0.055)
     my = int(frame_h * 0.045)
@@ -58,10 +59,13 @@ def logo_xy(
         return mx, frame_h - logo_h - my
     if position == "lower-right":
         return frame_w - logo_w - mx, frame_h - logo_h - my
-    x = (frame_w - logo_w) // 2
-    ty = float(np.clip(text_y, 0.06, 0.94))
+    # text_y is the top of the title. text_x is the title's horizontal center.
+    cx = int(frame_w * float(np.clip(text_x, 0.0, 1.0)))
+    x = cx - logo_w // 2
+    ty = float(np.clip(text_y, 0.0, 1.0))
     y = max(my, int(frame_h * ty) - logo_h - int(frame_h * 0.025))
     y = min(y, frame_h - logo_h - my)
+    x = max(0, min(x, max(0, frame_w - logo_w)))
     return x, y
 
 
@@ -72,6 +76,7 @@ def rasterize_logo(
     position: str,
     size: float,
     text_y: float = 0.86,
+    text_x: float = 0.5,
 ) -> np.ndarray | None:
     """Place the logo on a transparent full-frame RGBA layer."""
     size = float(np.clip(size, 0.06, 0.55))
@@ -84,7 +89,7 @@ def rasterize_logo(
         target_h = int(frame_h * 0.42)
         target_w = max(12, int(round(target_h * iw / ih)))
     fitted = logo.resize((target_w, target_h), Image.Resampling.LANCZOS)
-    x, y = logo_xy(frame_w, frame_h, target_w, target_h, position, text_y)
+    x, y = logo_xy(frame_w, frame_h, target_w, target_h, position, text_y, text_x)
     layer = np.zeros((frame_h, frame_w, 4), dtype=np.uint8)
     arr = np.asarray(fitted, dtype=np.uint8)
     x0 = max(0, x)
@@ -106,8 +111,9 @@ def apply_logo(
     size: float,
     opacity: float,
     text_y: float = 0.86,
+    text_x: float = 0.5,
 ) -> None:
-    layer = rasterize_logo(img.shape[1], img.shape[0], logo, position, size, text_y)
+    layer = rasterize_logo(img.shape[1], img.shape[0], logo, position, size, text_y, text_x)
     if layer is None:
         return
     opacity = float(np.clip(opacity, 0.0, 1.0))

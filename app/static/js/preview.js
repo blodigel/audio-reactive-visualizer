@@ -44,6 +44,8 @@ export class Preview {
     this.running = false;
     this._lookKey = "";
     this.bgImage = null;
+    this.bgVideo = null;
+    this.textFocus = -1;
     this.logoImage = null;
     this.catalog = null;
     this._fontFam = "";
@@ -96,10 +98,74 @@ export class Preview {
     return c;
   }
 
+  _dropVideo() {
+    const v = this.bgVideo;
+    if (!v) return;
+    v.pause();
+    v.removeAttribute("src");
+    try { v.load(); } catch { /* already detached */ }
+    this.bgVideo = null;
+  }
+
   setBackground(img) {
+    this._dropVideo();
     this.bgImage = img || null;
     this._lookKey = "";
     if (this.running) this.draw();
+  }
+
+  setVideoBackground(url) {
+    this.bgImage = null;
+    this._dropVideo();
+    if (!url) {
+      this._lookKey = "";
+      if (this.running) this.draw();
+      return;
+    }
+    const v = document.createElement("video");
+    v.muted = true;
+    v.defaultMuted = true;
+    v.playsInline = true;
+    v.loop = true;
+    v.preload = "auto";
+    this.bgVideo = v;
+    v.addEventListener("loadeddata", () => {
+      if (this.bgVideo === v && this.running) this.draw();
+    });
+    v.src = url;
+    this._lookKey = "";
+  }
+
+  setTextFocus(i) {
+    this.textFocus = Number.isFinite(i) ? i : -1;
+    if (this.running) this.draw();
+  }
+
+  _hasBg() {
+    return Boolean(this.bgImage || this.bgVideo);
+  }
+
+  _bgSource() {
+    if (this.bgVideo && this.bgVideo.readyState >= 2) return this.bgVideo;
+    return this.bgImage;
+  }
+
+  _syncVideo(t) {
+    const v = this.bgVideo;
+    if (!v || !Number.isFinite(v.duration) || v.duration <= 0) return;
+    const start = this.clipFade?.start || 0;
+    const local = Math.max(0, t - start);
+    const target = local % v.duration;
+    const drift = Math.abs(v.currentTime - target);
+    const wrapDrift = Math.min(drift, Math.abs(v.duration - drift));
+    const playing = this.audio && !this.audio.paused;
+    if (playing) {
+      if (v.paused) v.play().catch(() => {});
+      if (wrapDrift > 0.3) v.currentTime = target;
+    } else {
+      if (!v.paused) v.pause();
+      if (wrapDrift > 0.08) v.currentTime = target;
+    }
   }
 
   setLogo(img) {
@@ -358,6 +424,7 @@ export class Preview {
     const pal = paletteFromSettings(s);
     const f = this._features();
     const t = this.audio?.currentTime || 0;
+    this._syncVideo(t);
     const k = w / 1080; // pixel constants in viz.py are tuned for a 1080-wide frame
     const px = (n) => Math.max(0.75, n * k);
     const inten = s.intensity ?? 0.75;
@@ -387,8 +454,9 @@ export class Preview {
     const liveGain = 0.72 + 0.15 * (1 - trailAmt);
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, w, h);
-    if (this.bgImage) {
+    if (this._hasBg()) {
       this._field(ctx, w, h, f, pal, t, s);
+      this._gradePlate(ctx, w, h, f, pal, s, k);
     } else {
       // gain above 1 is applied as repeated additive passes
       let g = liveGain / (1 - b);
@@ -422,79 +490,38 @@ export class Preview {
     tc.globalAlpha = 1;
     tc.globalCompositeOperation = "source-over";
 
-    ctx.globalCompositeOperation = "lighter";
-    ctx.drawImage(this.trail, 0, 0);
-    ctx.globalCompositeOperation = "source-over";
-
-    // --- onset flash ------------------------------------------------------
-    if (f.onset > 0.5) {
-      ctx.globalCompositeOperation = "lighter";
-      ctx.fillStyle = rgba(pal.fg, clamp((f.onset - 0.5) * 0.55 * inten, 0, 1));
-      ctx.fillRect(0, 0, w, h);
-      ctx.globalCompositeOperation = "source-over";
-    }
-
-    // --- glitch slices, gated on hits like viz.py -------------------------
-    const gamt = s.glitch ?? 0;
-    if (gamt > 0.02 && f.onset * gamt > 0.12) {
-      const slices = 1 + Math.floor(gamt * 10 * f.onset);
-      for (let i = 0; i < slices; i++) {
-        const y = Math.random() * Math.max(h - px(8), 1);
-        const hh = px(2 + Math.random() * (4 + gamt * 28));
-        const dx = (Math.random() * 2 - 1) * (w * 0.07 * gamt + 1);
-        ctx.drawImage(this.canvas, 0, y, w, hh, dx, y, w, hh);
+    if (this._hasBg()) {
+      // Graphics are graded on their own layer, then added. The plasma crush
+      // stays off this path so a photo or video is not pushed out to white.
+      this._paintVizLayer(ctx, w, h, f, pal, s, k);
+      if (f.onset > 0.5) {
+        ctx.globalCompositeOperation = "lighter";
+        ctx.fillStyle = rgba(pal.fg, clamp((f.onset - 0.5) * 0.55 * inten, 0, 1));
+        ctx.fillRect(0, 0, w, h);
+        ctx.globalCompositeOperation = "source-over";
       }
-    }
-
-    // --- analog snow (_snow) ---------------------------------------------
-    const grainAmt = s.grain ?? 0.45;
-    const density = 0.002 + 0.01 * grainAmt * (0.25 + f.high + f.air);
-    const dots = Math.min(3500, Math.floor(w * h * density * 0.25));
-    if (dots > 0) {
+      this._vignette(ctx, w, h, s.vignette ?? 0.7);
+    } else {
       ctx.globalCompositeOperation = "lighter";
-      ctx.fillStyle = rgba(pal.fg, 0.45 + 0.5 * grainAmt);
-      const d = Math.max(1, Math.round(k * 2));
-      for (let i = 0; i < dots; i++) ctx.fillRect(Math.random() * w, Math.random() * h, d, d);
+      ctx.drawImage(this.trail, 0, 0);
       ctx.globalCompositeOperation = "source-over";
-    }
 
-    // --- bloom on highlights ---------------------------------------------
-    this._bloom(ctx, w, h, s.bloom ?? 0, k);
-
-    // --- vignette (make_vignette) -----------------------------------------
-    this._vignette(ctx, w, h, s.vignette ?? 0.7);
-
-    // --- scanlines --------------------------------------------------------
-    const sln = s.scanlines ?? 0.5;
-    if (sln > 0.01) {
-      const step = Math.max(2, Math.round(2 * k));
-      ctx.fillStyle = `rgba(0,0,0,${0.38 * sln})`;
-      for (let y = 0; y < h; y += step) ctx.fillRect(0, y, w, Math.max(1, step / 2));
-      if (sln > 0.55) {
-        ctx.fillStyle = `rgba(0,0,0,${0.12 * sln})`;
-        for (let y = step / 2; y < h; y += step * 2) ctx.fillRect(0, y, w, Math.max(1, step / 2));
+      if (f.onset > 0.5) {
+        ctx.globalCompositeOperation = "lighter";
+        ctx.fillStyle = rgba(pal.fg, clamp((f.onset - 0.5) * 0.55 * inten, 0, 1));
+        ctx.fillRect(0, 0, w, h);
+        ctx.globalCompositeOperation = "source-over";
       }
-    }
-
-    // --- chromatic aberration ---------------------------------------------
-    this._chroma(ctx, w, h, s.chromatic ?? 0, f.high, k);
-
-    // --- crush + contrast (LOOK crush 0.08, contrast 1.28) ----------------
-    // y = ((x-0.08)/0.92 - 0.5)*1.28 + 0.5 = 1.391x - 0.251, which is exactly
-    // contrast(1.565) followed by brightness(0.889); negatives clamp to 0 in both.
-    this._selfFilter(ctx, w, h, "contrast(1.565) brightness(0.889)");
-
-    // --- grain tile -------------------------------------------------------
-    if (grainAmt > 0.01) {
-      ctx.save();
-      ctx.globalAlpha = grainAmt * 0.45;
-      ctx.globalCompositeOperation = "overlay";
-      const ox = (this.frame * 13) % 128;
-      const oy = (this.frame * 19) % 128;
-      ctx.fillStyle = ctx.createPattern(this.grain, "repeat");
-      ctx.translate(-ox, -oy);
-      ctx.fillRect(0, 0, w + 128, h + 128);
-      ctx.restore();
+      const grainAmt = s.grain ?? 0.45;
+      this._glitchSlices(ctx, w, h, s.glitch ?? 0, f.onset, k);
+      this._snowDots(ctx, w, h, grainAmt, f, pal, k, false);
+      this._bloom(ctx, w, h, s.bloom ?? 0, k);
+      this._vignette(ctx, w, h, s.vignette ?? 0.7);
+      this._scanlines(ctx, w, h, s.scanlines ?? 0.5, k, false);
+      this._chroma(ctx, w, h, s.chromatic ?? 0, f.high, k);
+      // crush + contrast. y = 1.391x - 0.251, i.e. contrast(1.565) brightness(0.889).
+      this._selfFilter(ctx, w, h, "contrast(1.565) brightness(0.889)");
+      this._grainOverlay(ctx, w, h, grainAmt, false);
     }
 
     // --- jitter + bass punch, inside the frame so text stays put ---------
@@ -544,20 +571,25 @@ export class Preview {
   // colour at the same overall level.
   _field(ctx, w, h, f, pal, t, s) {
     const op = clamp(s.bg_opacity ?? 0.22, 0, 1);
-    if (this.bgImage) {
+    const bg = this._bgSource();
+    const pending = Boolean(this.bgVideo) && !bg;
+    if (bg) {
       // live = photo*(1-op) + tint*op, then a wash of the field
-      drawCover(ctx, this.bgImage, w, h);
+      drawCover(ctx, bg, w, h);
       ctx.fillStyle = rgba(pal.bg, op);
+      ctx.fillRect(0, 0, w, h);
+    } else if (pending) {
+      ctx.fillStyle = "#000";
       ctx.fillRect(0, 0, w, h);
     } else {
       ctx.fillStyle = rgba(pal.bg);
       ctx.fillRect(0, 0, w, h);
     }
     // viz.py photo path: live = photo*(1-op) + tint*op + (field - tint)*0.35*(1-0.5*op)
-    const washGain = this.bgImage ? 0.35 * (1 - 0.5 * op) : 1;
+    const washGain = bg || pending ? 0.35 * (1 - 0.5 * op) : 1;
     const level = (0.42 + 0.7 * (0.4 + f.energy)) * 0.5 * washGain;
     ctx.save();
-    if (this.bgImage) ctx.globalCompositeOperation = "lighter";
+    if (bg || pending) ctx.globalCompositeOperation = "lighter";
     ctx.fillStyle = rgba(pal.fog, clamp(level * 0.35, 0, 1));
     ctx.fillRect(0, 0, w, h);
     const blobs = 3;
@@ -833,8 +865,96 @@ export class Preview {
     }
   }
 
+  _px(k) {
+    return (n) => Math.max(0.75, n * k);
+  }
+
+  _gradePlate(ctx, w, h, f, pal, s, k) {
+    const blur = s.bg_blur ?? 0;
+    const bright = s.bg_brightness ?? 0.5;
+    const sat = s.bg_saturation ?? 1;
+    const parts = [];
+    if (blur > 0.01) parts.push(`blur(${((0.4 + blur * 8) * k).toFixed(2)}px)`);
+    if (Math.abs(bright - 0.5) > 0.01) parts.push(`brightness(${(bright * 2).toFixed(3)})`);
+    if (sat < 0.999) parts.push(`saturate(${Number(sat).toFixed(3)})`);
+    if (parts.length) this._selfFilter(ctx, w, h, parts.join(" "));
+    this._glitchSlices(ctx, w, h, s.bg_glitch ?? 0, f.onset, k);
+    this._scanlines(ctx, w, h, s.bg_scanlines ?? 0, k, false);
+    this._chroma(ctx, w, h, s.bg_chroma ?? 0, f.high, k);
+    this._grainOverlay(ctx, w, h, s.bg_grain ?? 0, false);
+  }
+
+  _paintVizLayer(ctx, w, h, f, pal, s, k) {
+    const layer = this.sceneCtx;
+    const buf = this.sceneBuf;
+    layer.globalCompositeOperation = "copy";
+    layer.drawImage(this.trail, 0, 0);
+    layer.globalCompositeOperation = "source-over";
+    this._glitchSlices(layer, w, h, s.glitch ?? 0, f.onset, k);
+    this._snowDots(layer, w, h, s.grain ?? 0, f, pal, k, true);
+    this._bloom(layer, w, h, s.bloom ?? 0, k, buf);
+    this._scanlines(layer, w, h, s.scanlines ?? 0, k, true);
+    this._chroma(layer, w, h, s.chromatic ?? 0, f.high, k, buf);
+    this._grainOverlay(layer, w, h, s.grain ?? 0, true);
+    ctx.globalCompositeOperation = "lighter";
+    ctx.drawImage(buf, 0, 0);
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  _glitchSlices(ctx, w, h, gamt, onset, k) {
+    if (!(gamt > 0.02 && onset * gamt > 0.12)) return;
+    const px = this._px(k);
+    const slices = 1 + Math.floor(gamt * 10 * onset);
+    const src = ctx.canvas;
+    for (let i = 0; i < slices; i++) {
+      const y = Math.random() * Math.max(h - px(8), 1);
+      const hh = px(2 + Math.random() * (4 + gamt * 28));
+      const dx = (Math.random() * 2 - 1) * (w * 0.07 * gamt + 1);
+      ctx.drawImage(src, 0, y, w, hh, dx, y, w, hh);
+    }
+  }
+
+  _snowDots(ctx, w, h, grainAmt, f, pal, k, inkOnly) {
+    const density = 0.002 + 0.01 * grainAmt * (0.25 + f.high + f.air);
+    const dots = Math.min(3500, Math.floor(w * h * density * 0.25));
+    if (dots <= 0) return;
+    ctx.save();
+    ctx.globalCompositeOperation = inkOnly ? "source-atop" : "lighter";
+    ctx.fillStyle = rgba(pal.fg, 0.45 + 0.5 * grainAmt);
+    const d = Math.max(1, Math.round(k * 2));
+    for (let i = 0; i < dots; i++) ctx.fillRect(Math.random() * w, Math.random() * h, d, d);
+    ctx.restore();
+  }
+
+  _scanlines(ctx, w, h, sln, k, inkOnly) {
+    if (sln <= 0.01) return;
+    const step = Math.max(2, Math.round(2 * k));
+    ctx.save();
+    ctx.globalCompositeOperation = inkOnly ? "destination-out" : "source-over";
+    ctx.fillStyle = `rgba(0,0,0,${0.38 * sln})`;
+    for (let y = 0; y < h; y += step) ctx.fillRect(0, y, w, Math.max(1, step / 2));
+    if (sln > 0.55) {
+      ctx.fillStyle = `rgba(0,0,0,${0.12 * sln})`;
+      for (let y = step / 2; y < h; y += step * 2) ctx.fillRect(0, y, w, Math.max(1, step / 2));
+    }
+    ctx.restore();
+  }
+
+  _grainOverlay(ctx, w, h, grainAmt, inkOnly) {
+    if (grainAmt <= 0.01) return;
+    ctx.save();
+    ctx.globalAlpha = grainAmt * (inkOnly ? 0.35 : 0.45);
+    ctx.globalCompositeOperation = inkOnly ? "source-atop" : "overlay";
+    const ox = (this.frame * 13) % 128;
+    const oy = (this.frame * 19) % 128;
+    ctx.fillStyle = ctx.createPattern(this.grain, "repeat");
+    ctx.translate(-ox, -oy);
+    ctx.fillRect(0, 0, w + 128, h + 128);
+    ctx.restore();
+  }
+
   // bloom: highlights above ~0.52 blurred and added back
-  _bloom(ctx, w, h, amount, k) {
+  _bloom(ctx, w, h, amount, k, source = null) {
     if (amount < 0.02) return;
     const buf = this.bloom;
     const bw = Math.max(2, (w / 2) | 0);
@@ -844,14 +964,24 @@ export class Preview {
       buf.height = bh;
     }
     const bctx = this.bctx;
+    bctx.globalCompositeOperation = "source-over";
     bctx.clearRect(0, 0, bw, bh);
     // viz.py: hi = img * clip((max(rgb) - 0.52) * 2.8), blurred, added * bloom * 1.35.
     // The SVG filter is clip(2.8*c - 1.456) per channel: zero below 0.52 like the
     // mask, a little hotter above it, so the add is scaled down to compensate.
     const blur = `blur(${((5 + 16 * amount) * k) / 2}px)`;
     bctx.filter = this._threshFilter ? `${this._threshFilter} ${blur}` : `contrast(2.8) brightness(0.6) ${blur}`;
-    bctx.drawImage(this.canvas, 0, 0, bw, bh);
+    bctx.drawImage(source || this.canvas, 0, 0, bw, bh);
     bctx.filter = "none";
+    if (source) {
+      // That filter promotes transparent pixels to opaque. Mask the glow back
+      // to the graphics, or lighter-compositing it whites out the picture.
+      bctx.globalCompositeOperation = "destination-in";
+      bctx.filter = `blur(${Math.max(0.5, ((1.5 + 8 * amount) * k) / 2)}px)`;
+      bctx.drawImage(source, 0, 0, bw, bh);
+      bctx.filter = "none";
+      bctx.globalCompositeOperation = "source-over";
+    }
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     ctx.globalAlpha = Math.min(1, amount * (this._threshFilter ? 1.35 : 1.5));
@@ -878,12 +1008,12 @@ export class Preview {
 
   // viz.py rolls the red channel left and the blue channel right; brightness is
   // unchanged. Channels are isolated by multiplying with a pure colour.
-  _chroma(ctx, w, h, amount, high, k) {
+  _chroma(ctx, w, h, amount, high, k, source = null) {
     if (amount < 0.02) return;
     const shift = Math.max(1, Math.round((1 + amount * 7 + high * 2) * k));
     const sc = this.sctx;
     sc.globalCompositeOperation = "copy";
-    sc.drawImage(this.canvas, 0, 0);
+    sc.drawImage(source || this.canvas, 0, 0);
     sc.globalCompositeOperation = "source-over";
     if (this.overlayFx.width !== w || this.overlayFx.height !== h) {
       this.overlay.width = w;
@@ -909,6 +1039,10 @@ export class Preview {
     ctx.drawImage(this.overlayFx, -shift, 0);
     isolate("rgb(0,0,255)");
     ctx.drawImage(this.overlayFx, shift, 0);
+    // The channel rebuild paints opaque pixels. Put back the alpha from the
+    // copy in scratch, or a transparent graphics layer whites out the picture.
+    ctx.globalCompositeOperation = "destination-in";
+    ctx.drawImage(this.scratch, 0, 0);
     ctx.restore();
   }
 
@@ -1002,39 +1136,59 @@ export class Preview {
     ctx.restore();
   }
 
-  // build_text_layer: same size formula, shadow, spacing and clamp as viz.py
+  // build_text_boxes / build_text_layer: same size formula and shadow as viz.py.
+  // With text_boxes, x/y are the center of each line. Without them, title and
+  // subtext stay one centered stack at text_y.
   _text(ctx, w, h, pal, s, k) {
-    if (!s.text && !s.subtext) return;
+    const boxes = Array.isArray(s.text_boxes) && s.text_boxes.length ? s.text_boxes : null;
+    if (!boxes && !s.text && !s.subtext) return;
     const ox = this._prepOverlay(w, h);
     const fam = this._fontFamily(s);
     const track = this._tracking(s);
-    const fs = Math.max(14 * k, w * 0.048 * (0.55 + (s.text_size ?? 0.65)));
-    const subFs = Math.max(11 * k, fs * 0.42);
-    ox.textAlign = "center";
-    ox.textBaseline = "top";
-    let y = h * clamp(s.text_y ?? 0.86, 0.06, 0.94);
-    y = Math.max(h * 0.05, Math.min(y, h - fs * (s.subtext ? 2.4 : 1.4)));
     const shadow = "rgba(0,0,0,0.86)";
-    const drawSpaced = (text, size, fill, tr, yy) => {
-      ox.font = `${size}px "${fam}", sans-serif`;
-      ox.letterSpacing = `${tr}em`;
-      // letterSpacing adds a trailing gap that centre alignment would include
-      const x = w / 2 + (size * tr) / 2;
-      ox.fillStyle = shadow;
-      ox.fillText(text, x, yy + 3 * k);
-      ox.fillStyle = fill;
-      ox.fillText(text, x, yy);
-      const m = ox.measureText("Ag");
-      const used = (m.actualBoundingBoxAscent || 0) + (m.actualBoundingBoxDescent || 0);
-      return used || size * 0.9;
-    };
-    if (s.text) {
-      const used = drawSpaced(s.text, fs, rgba(pal.accent), track, y);
-      y += used * 1.45;
-    }
-    if (s.subtext) {
-      const subFill = rgba(pal.accent.map((c) => Math.min(255, c + 20)), 0.94);
-      drawSpaced(s.subtext, subFs, subFill, Math.min(track + 0.04, 0.18), y);
+    if (boxes) {
+      const active = boxes.filter((b) => b && b.on && String(b.text || "").trim());
+      if (!active.length) return;
+      ox.textAlign = "center";
+      ox.textBaseline = "middle";
+      for (const b of active) {
+        const fs = Math.max(14 * k, w * 0.048 * (0.55 + (b.size ?? 0.65)));
+        ox.font = `${fs}px "${fam}", sans-serif`;
+        ox.letterSpacing = `${track}em`;
+        const x = w * clamp(b.x ?? 0.5, 0.02, 0.98) + (fs * track) / 2;
+        const y = h * clamp(b.y ?? 0.5, 0.02, 0.98);
+        ox.fillStyle = shadow;
+        ox.fillText(b.text, x, y + 3 * k);
+        ox.fillStyle = rgba(pal.accent);
+        ox.fillText(b.text, x, y);
+      }
+    } else {
+      const fs = Math.max(14 * k, w * 0.048 * (0.55 + (s.text_size ?? 0.65)));
+      const subFs = Math.max(11 * k, fs * 0.42);
+      ox.textAlign = "center";
+      ox.textBaseline = "top";
+      let y = h * clamp(s.text_y ?? 0.86, 0.06, 0.94);
+      y = Math.max(h * 0.05, Math.min(y, h - fs * (s.subtext ? 2.4 : 1.4)));
+      const drawSpaced = (text, size, fill, tr, yy) => {
+        ox.font = `${size}px "${fam}", sans-serif`;
+        ox.letterSpacing = `${tr}em`;
+        const x = w / 2 + (size * tr) / 2;
+        ox.fillStyle = shadow;
+        ox.fillText(text, x, yy + 3 * k);
+        ox.fillStyle = fill;
+        ox.fillText(text, x, yy);
+        const m = ox.measureText("Ag");
+        const used = (m.actualBoundingBoxAscent || 0) + (m.actualBoundingBoxDescent || 0);
+        return used || size * 0.9;
+      };
+      if (s.text) {
+        const used = drawSpaced(s.text, fs, rgba(pal.accent), track, y);
+        y += used * 1.45;
+      }
+      if (s.subtext) {
+        const subFill = rgba(pal.accent.map((c) => Math.min(255, c + 20)), 0.94);
+        drawSpaced(s.subtext, subFs, subFill, Math.min(track + 0.04, 0.18), y);
+      }
     }
     ox.letterSpacing = "0px";
     this._stampOverlay(ctx, w, h, {
@@ -1044,6 +1198,36 @@ export class Preview {
       jitter: s.text_jitter ?? 0,
       opacity: s.text_opacity ?? 0.92,
     }, k);
+  }
+
+  hitText(nx, ny) {
+    const s = this.settings;
+    const boxes = s?.text_boxes;
+    if (!Array.isArray(boxes) || !boxes.length) return -1;
+    const { w, h } = this._size();
+    if (w < 8 || h < 8) return -1;
+    const fam = this._fontFamily(s);
+    const track = this._tracking(s);
+    const k = w / 1080;
+    const ox = this.octx;
+    for (let i = boxes.length - 1; i >= 0; i--) {
+      const b = boxes[i];
+      if (!b || !b.on || !String(b.text || "").trim()) continue;
+      const fs = Math.max(14 * k, w * 0.048 * (0.55 + (b.size ?? 0.65)));
+      ox.font = `${fs}px "${fam}", sans-serif`;
+      ox.letterSpacing = `${track}em`;
+      const width = ox.measureText(b.text).width;
+      ox.letterSpacing = "0px";
+      const halfW = width / 2 / w + 0.02;
+      const halfH = (fs * 0.65) / h + 0.015;
+      if (Math.abs(nx - b.x) <= halfW && Math.abs(ny - b.y) <= halfH) return i;
+    }
+    const focus = this.textFocus;
+    if (focus >= 0 && boxes[focus] && boxes[focus].on) {
+      const b = boxes[focus];
+      if (Math.abs(nx - b.x) < 0.045 && Math.abs(ny - b.y) < 0.045) return focus;
+    }
+    return -1;
   }
 
   _logo(ctx, w, h, s) {
@@ -1069,10 +1253,11 @@ export class Preview {
       x = w - lw - mx;
       y = h - lh - my;
     } else if (pos === "above-text") {
-      x = (w - lw) / 2;
-      const ty = clamp(s.text_y ?? 0.86, 0.06, 0.94);
-      y = Math.max(my, h * ty - lh - h * 0.025);
+      const anchor = titleAnchor(s, w, h);
+      x = w * anchor.x - lw / 2;
+      y = Math.max(my, h * anchor.top - lh - h * 0.025);
       y = Math.min(y, h - lh - my);
+      x = Math.max(0, Math.min(x, Math.max(0, w - lw)));
     }
     const ox = this._prepOverlay(w, h);
     ox.drawImage(img, x, y, lw, lh);
@@ -1122,9 +1307,21 @@ function installThresholdFilter(testCtx) {
   }
 }
 
+function titleAnchor(s, w, h) {
+  const boxes = s.text_boxes;
+  if (Array.isArray(boxes) && boxes.length) {
+    const b = boxes[0];
+    const k = w / 1080;
+    const fs = Math.max(14 * k, w * 0.048 * (0.55 + (b.size ?? 0.65)));
+    const y = clamp(b.y ?? 0.86, 0.02, 0.98);
+    return { x: clamp(b.x ?? 0.5, 0.02, 0.98), top: y - fs / 2 / h };
+  }
+  return { x: 0.5, top: clamp(s.text_y ?? 0.86, 0.06, 0.94) };
+}
+
 function drawCover(ctx, img, w, h) {
-  const iw = img.naturalWidth || img.width;
-  const ih = img.naturalHeight || img.height;
+  const iw = img.videoWidth || img.naturalWidth || img.width;
+  const ih = img.videoHeight || img.naturalHeight || img.height;
   if (!iw || !ih) return;
   const scale = Math.max(w / iw, h / ih);
   const nw = iw * scale;

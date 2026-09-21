@@ -163,6 +163,7 @@ button { cursor: pointer; }
   width: 100%;
   height: 100%;
   display: block;
+  touch-action: none;
 }
 .stage-empty {
   position: absolute;
@@ -590,3 +591,39 @@ button { cursor: pointer; }
   text-transform: none;
 }
 .recent .faint { color: var(--faint); font-family: var(--mono); font-size: 11px; }
+
+.text-hint {
+  margin: 0 0 8px;
+  color: var(--faint);
+  font-size: 11px;
+}
+.text-box {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 8px;
+  border: 1px solid var(--hair);
+}
+.text-box.on { border-color: var(--accent); }
+.text-box-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.text-axes {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+.text-axis-name b {
+  float: right;
+  color: var(--accent-soft);
+  font-weight: 400;
+}
+#text-add { margin-bottom: 8px; }

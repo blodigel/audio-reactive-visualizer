@@ -1,6 +1,6 @@
 [project]
 name = "audio-reactive-visualizer"
-version = "1.1.0"
+version = "1.2.0"
 description = "Audio → Instagram-friendly audio-reactive visualizer clips. Built for noise and experimental music."
 readme = "README.md"
 requires-python = ">=3.11"

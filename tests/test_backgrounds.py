@@ -1,8 +1,11 @@
+import shutil
+import subprocess
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 
-from app.backgrounds import cover_fit
+from app.backgrounds import cover_fit, open_background
 from app.models import VisualSettings
 
 
@@ -28,6 +31,56 @@ def test_save_and_upload_api(client, tmp_path: Path):
 def test_rejects_non_image(client):
     r = client.post("/api/backgrounds", files={"file": ("x.txt", b"hello", "text/plain")})
     assert r.status_code == 400
+
+
+def test_video_background_loops_frames(client, tmp_path: Path):
+    ffmpeg = shutil.which("ffmpeg")
+    assert ffmpeg
+    src = tmp_path / "bg.mp4"
+    subprocess.check_call(
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=64x48:rate=10:duration=2",
+            "-pix_fmt",
+            "yuv420p",
+            "-an",
+            str(src),
+        ]
+    )
+    with src.open("rb") as f:
+        r = client.post("/api/backgrounds", files={"file": ("clip.mp4", f, "video/mp4")})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["kind"] == "video"
+    assert body["video_url"]
+    meta = client.get(f"/api/backgrounds/{body['id']}/meta")
+    assert meta.status_code == 200
+    assert meta.json()["kind"] == "video"
+    assert meta.json()["duration"] > 0.5
+    vid = client.get(body["video_url"])
+    assert vid.status_code == 200
+    assert vid.headers["content-type"].startswith("video/")
+    poster = client.get(body["url"])
+    assert poster.status_code == 200
+    assert poster.headers["content-type"].startswith("image/")
+    source = open_background(body["id"], 80, 96)
+    assert source is not None
+    try:
+        a = source.frame(0.0)
+        b = source.frame(1.0)
+        again = source.frame(0.0)
+    finally:
+        source.close()
+    assert a.shape == (96, 80, 3)
+    assert float(np.abs(a - b).mean()) > 0.01
+    assert float(np.abs(a - again).mean()) < 0.05
 
 
 def test_background_id_validation():

@@ -13,7 +13,16 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.audio import AUDIO_EXT, AudioError, analyze_file, ingest_audio
-from app.backgrounds import ALLOWED_EXT, BackgroundError, save_upload
+from app.backgrounds import (
+    IMAGE_EXT,
+    VIDEO_EXT,
+    BackgroundError,
+    background_kind,
+    read_meta,
+    save_upload,
+    save_video,
+    write_meta,
+)
 from app.clips import suggest_clips
 from app.config import config
 from app.demo import write_demo_wav
@@ -160,12 +169,20 @@ def create_app() -> FastAPI:
     async def upload_background(file: UploadFile = File(...)) -> dict:
         name = file.filename or "background.png"
         ext = Path(name).suffix.lower()
-        if ext not in ALLOWED_EXT:
-            raise HTTPException(400, "Use a PNG, JPEG or WebP image")
+        if ext in IMAGE_EXT:
+            kind = "image"
+            limit = 25 * 1024 * 1024
+            too_big = "Image is larger than 25 MB"
+        elif ext in VIDEO_EXT:
+            kind = "video"
+            limit = 80 * 1024 * 1024
+            too_big = "Video is larger than 80 MB"
+        else:
+            raise HTTPException(400, "Use a PNG, JPEG, WebP image or an MP4, MOV, WebM video")
         bg_id = uuid.uuid4().hex[:16]
         raw = config.backgrounds_dir / f"{bg_id}.src{ext}"
-        dest = config.backgrounds_dir / f"{bg_id}.png"
-        limit = 25 * 1024 * 1024
+        poster = config.backgrounds_dir / f"{bg_id}.png"
+        movie = config.backgrounds_dir / f"{bg_id}.mp4"
         written = 0
         try:
             with raw.open("wb") as out:
@@ -175,7 +192,7 @@ def create_app() -> FastAPI:
                         break
                     written += len(chunk)
                     if written > limit:
-                        raise HTTPException(413, "Image is larger than 25 MB")
+                        raise HTTPException(413, too_big)
                     out.write(chunk)
         except HTTPException:
             raw.unlink(missing_ok=True)
@@ -185,14 +202,57 @@ def create_app() -> FastAPI:
         if written < 32:
             raw.unlink(missing_ok=True)
             raise HTTPException(400, "File is empty")
+        duration = 0.0
         try:
-            save_upload(raw, dest)
+            if kind == "video":
+                duration = save_video(raw, movie, poster)
+            else:
+                save_upload(raw, poster)
         except BackgroundError as exc:
-            dest.unlink(missing_ok=True)
+            poster.unlink(missing_ok=True)
+            movie.unlink(missing_ok=True)
             raise HTTPException(400, str(exc)) from exc
         finally:
             raw.unlink(missing_ok=True)
-        return {"id": bg_id, "filename": name, "url": f"/api/backgrounds/{bg_id}"}
+        write_meta(
+            bg_id,
+            {"id": bg_id, "kind": kind, "filename": name, "duration": duration},
+        )
+        video_url = f"/api/backgrounds/{bg_id}/video" if kind == "video" else ""
+        return {
+            "id": bg_id,
+            "filename": name,
+            "kind": kind,
+            "duration": duration,
+            "url": f"/api/backgrounds/{bg_id}",
+            "video_url": video_url,
+        }
+
+    @app.get("/api/backgrounds/{bg_id}/meta")
+    def get_background_meta(bg_id: str) -> dict:
+        _check_id(bg_id)
+        meta = read_meta(bg_id) or {}
+        png = config.backgrounds_dir / f"{bg_id}.png"
+        mp4 = config.backgrounds_dir / f"{bg_id}.mp4"
+        if not meta and not png.is_file() and not mp4.is_file():
+            raise HTTPException(404, "Background not found")
+        kind = background_kind(bg_id) if (png.is_file() or mp4.is_file() or meta) else "image"
+        return {
+            "id": bg_id,
+            "kind": kind,
+            "filename": str(meta.get("filename") or ""),
+            "duration": float(meta.get("duration") or 0),
+            "url": f"/api/backgrounds/{bg_id}",
+            "video_url": f"/api/backgrounds/{bg_id}/video" if kind == "video" else "",
+        }
+
+    @app.get("/api/backgrounds/{bg_id}/video")
+    def get_background_video(bg_id: str) -> FileResponse:
+        _check_id(bg_id)
+        path = config.backgrounds_dir / f"{bg_id}.mp4"
+        if not path.is_file():
+            raise HTTPException(404, "Background video not found")
+        return FileResponse(path, media_type="video/mp4", filename="background.mp4")
 
     @app.get("/api/backgrounds/{bg_id}")
     def get_background(bg_id: str) -> FileResponse:

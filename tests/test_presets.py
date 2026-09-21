@@ -15,6 +15,8 @@ def test_catalog_complete():
     assert any(s["id"] == "mixed" for s in cat["scenes"])
     assert any(f["id"] == "reels" for f in cat["formats"])
     assert "bg_color" in cat["defaults"]
+    assert any(s["key"] == "bg_blur" for s in cat["bg_sliders"])
+    assert any(s["key"] == "trail" for s in cat["viz_sliders"])
     assert any(s["key"] == "text_glitch" for s in cat["text_fx"])
     assert any(s["key"] == "logo_glow" for s in cat["logo_fx"])
     assert {lk["id"] for lk in cat["looks"]} >= {"rust", "bone", "ice", "blood", "acid"}

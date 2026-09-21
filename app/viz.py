@@ -7,9 +7,10 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from app.audio import interp_feat, interp_spec, window_stereo
+from app.backgrounds import StillSource
 from app.fonts import load_truetype, resolve_font
 from app.logos import rasterize_logo
-from app.models import VisualSettings
+from app.models import TextBox, VisualSettings
 from app.presets import LOOK, palette_from_settings, resolved_scene
 
 
@@ -131,6 +132,75 @@ def build_text_layer(
     return arr
 
 
+def _draw_spaced(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.ImageFont,
+    fill: tuple[int, int, int, int],
+    track: float,
+    cx: float,
+    cy: float,
+) -> None:
+    """Draw one line so its ink is centered on (cx, cy)."""
+    if not text:
+        return
+    widths = [draw.textlength(ch, font=font) for ch in text]
+    gap = font.size * track
+    total = sum(widths) + gap * max(len(text) - 1, 0)
+    bbox = font.getbbox(text)
+    if bbox:
+        ink_mid = (bbox[1] + bbox[3]) / 2
+    else:
+        ink_mid = font.size / 2
+    y = cy - ink_mid
+    x = cx - total / 2
+    for ch, cw in zip(text, widths, strict=True):
+        draw.text((x, y), ch, font=font, fill=fill)
+        x += cw + gap
+
+
+def build_text_boxes(
+    w: int,
+    h: int,
+    boxes: list[TextBox],
+    color: tuple[float, float, float],
+    font_path: Path | None = None,
+    tracking: float = 0.08,
+) -> np.ndarray | None:
+    """Rasterize each active line at its own center. One layer, so text FX hits them together."""
+    active = [b for b in boxes if b.on and b.text]
+    if not active:
+        return None
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    fill = (
+        int(color[0] * 255),
+        int(color[1] * 255),
+        int(color[2] * 255),
+        255,
+    )
+    shadow = (0, 0, 0, 220)
+    for box in active:
+        fs = max(14, int(w * 0.048 * (0.55 + float(box.size))))
+        font = load_truetype(font_path, fs)
+        cx = float(w) * float(box.x)
+        cy = float(h) * float(box.y)
+        _draw_spaced(draw, box.text, font, shadow, tracking, cx, cy + 3)
+        _draw_spaced(draw, box.text, font, fill, tracking, cx, cy)
+    return np.array(img, dtype=np.uint8)
+
+
+def title_anchor(settings: VisualSettings, w: int, h: int) -> tuple[float, float]:
+    """Horizontal center and top of the title, as frame fractions, for the above-text logo."""
+    if settings.text_boxes:
+        box = settings.text_boxes[0]
+        fs = max(14, int(w * 0.048 * (0.55 + float(box.size))))
+        top = float(box.y) - (fs / 2) / float(h)
+        return float(box.x), top
+    y = float(np.clip(settings.text_y, 0.06, 0.94))
+    return 0.5, y
+
+
 def apply_text(img: np.ndarray, layer_rgba: np.ndarray, opacity: float) -> None:
     alpha = (layer_rgba[:, :, 3:4].astype(np.float32) / 255.0) * opacity
     rgb = layer_rgba[:, :, :3].astype(np.float32) / 255.0
@@ -227,7 +297,10 @@ class VisualEngine:
         self.w = width
         self.h = height
         self.clip_start = clip_start
-        self.bg_photo = background
+        if isinstance(background, np.ndarray):
+            self.bg = StillSource(background)
+        else:
+            self.bg = background
         self.logo = logo
         self.scene = resolved_scene(settings)
         self.palette = palette_from_settings(settings)
@@ -246,18 +319,28 @@ class VisualEngine:
         self.part_vel = (self.rng.random((n_part, 2), dtype=np.float32) - 0.5) * 2.0
         self.part_life = self.rng.random(n_part, dtype=np.float32)
         font_path, tracking = resolve_font(settings.font, settings.font_id)
-        self.text_layer = build_text_layer(
-            width,
-            height,
-            settings.text,
-            settings.subtext,
-            settings.text_position,
-            settings.text_size,
-            self.palette["accent"],
-            font_path=font_path,
-            tracking=tracking,
-            y_frac=float(settings.text_y),
-        )
+        if settings.text_boxes:
+            self.text_layer = build_text_boxes(
+                width,
+                height,
+                list(settings.text_boxes),
+                self.palette["accent"],
+                font_path=font_path,
+                tracking=tracking,
+            )
+        else:
+            self.text_layer = build_text_layer(
+                width,
+                height,
+                settings.text,
+                settings.subtext,
+                settings.text_position,
+                settings.text_size,
+                self.palette["accent"],
+                font_path=font_path,
+                tracking=tracking,
+                y_frac=float(settings.text_y),
+            )
         self.yy, self.xx = np.mgrid[0:height, 0:width].astype(np.float32)
         # The plasma field is smooth, so it is computed on a coarse grid in full-frame
         # pixel coordinates and bilinearly upscaled. FIELD_STEP=4 cuts ~30% of frame time.
@@ -505,8 +588,16 @@ class VisualEngine:
                 cv2.circle(overlay, (x, y), max(rad, 1), col, -1, cv2.LINE_AA)
         cv2.add(layer, overlay, layer)
 
-    def _snow(self, img: np.ndarray, feat: dict, frame_i: int) -> None:
-        density = 0.002 + 0.01 * float(self.settings.grain) * (0.25 + feat["high"] + feat["air"])
+    def _snow(
+        self,
+        img: np.ndarray,
+        feat: dict,
+        frame_i: int,
+        amount: float | None = None,
+        mask: np.ndarray | None = None,
+    ) -> None:
+        grain = float(self.settings.grain if amount is None else amount)
+        density = 0.002 + 0.01 * grain * (0.25 + feat["high"] + feat["air"])
         n = int(self.h * self.w * density)
         n = max(0, min(n, 18000))
         if n == 0:
@@ -514,8 +605,104 @@ class VisualEngine:
         rng = np.random.default_rng(self.settings.seed * 1009 + frame_i)
         xs = rng.integers(0, self.w, n)
         ys = rng.integers(0, self.h, n)
-        v = 0.45 + 0.5 * float(self.settings.grain)
+        if mask is not None:
+            keep = mask[ys, xs, 0] > 0.15
+            if not np.any(keep):
+                return
+            xs = xs[keep]
+            ys = ys[keep]
+        v = 0.45 + 0.5 * grain
         img[ys, xs] = np.clip(img[ys, xs] + v * _rgb(self.palette["fg"]), 0.0, 1.0)
+
+    def _glitch_inplace(self, img: np.ndarray, amount: float, feat: dict, frame_i: int, seed_off: int) -> None:
+        gamt = float(amount)
+        if gamt <= 0.02 or feat["onset"] * gamt <= 0.12:
+            return
+        rng = np.random.default_rng(self.settings.seed + frame_i * 13 + seed_off)
+        n_slices = int(1 + gamt * 10 * feat["onset"])
+        h, w = img.shape[:2]
+        for _ in range(n_slices):
+            y = int(rng.integers(0, max(h - 8, 1)))
+            hgt = int(rng.integers(2, max(3, int(6 + gamt * 28))))
+            hgt = min(hgt, h - y)
+            shift = int(rng.integers(-int(w * 0.07 * gamt) - 1, int(w * 0.07 * gamt) + 2))
+            img[y : y + hgt] = np.roll(img[y : y + hgt], shift, axis=1)
+            if gamt > 0.4:
+                ch = int(rng.integers(0, 3))
+                img[y : y + hgt, :, ch] = np.roll(img[y : y + hgt, :, ch], shift // 2, axis=1)
+
+    def _bloom_inplace(self, img: np.ndarray, amount: float) -> None:
+        bloom = float(amount)
+        if bloom <= 0.02:
+            return
+        gray = img.max(axis=2)
+        mask = np.clip((gray - 0.52) * 2.8, 0.0, 1.0)
+        hi = img * mask[:, :, None]
+        sigma = 5.0 + 16.0 * bloom
+        blurred = cv2.GaussianBlur(hi, (0, 0), sigmaX=sigma)
+        img += blurred * bloom * 1.35
+
+    def _scanlines_inplace(self, img: np.ndarray, amount: float) -> None:
+        sl = float(amount)
+        if sl <= 0.01:
+            return
+        img[::2] *= 1.0 - 0.38 * sl
+        if sl > 0.55:
+            img[1::4] *= 1.0 - 0.12 * sl
+
+    def _chroma_split(self, img: np.ndarray, amount: float, feat: dict) -> np.ndarray:
+        ch = float(amount)
+        if ch <= 0.02:
+            return img
+        shift = max(1, int(1 + ch * 7 + feat["high"] * 2))
+        out = img.copy()
+        out[:, :, 0] = np.roll(img[:, :, 0], -shift, axis=1)
+        out[:, :, 2] = np.roll(img[:, :, 2], shift, axis=1)
+        return out
+
+    def _grain_inplace(self, img: np.ndarray, amount: float, frame_i: int, mask: np.ndarray | None) -> None:
+        grain_amt = float(amount)
+        if grain_amt <= 0.01:
+            return
+        tile = self.grain_tiles[frame_i % len(self.grain_tiles)]
+        gh, gw = tile.shape
+        yy = (frame_i * 19) % gh
+        xx = (frame_i * 13) % gw
+        tiled = np.tile(tile, (self.h // gh + 3, self.w // gw + 3))
+        g = tiled[yy : yy + self.h, xx : xx + self.w]
+        delta = (g[:, :, None] - 0.5) * grain_amt * 0.55
+        if mask is not None:
+            delta *= mask
+        np.clip(img + delta, 0.0, 1.0, out=img)
+
+    def _crush(self, img: np.ndarray) -> np.ndarray:
+        crush = float(self.look.get("crush", 0.05))
+        contrast = float(self.look.get("contrast", 1.15))
+        img = np.clip((img - crush) / max(1.0 - crush, 0.2), 0.0, 1.0)
+        return np.clip((img - 0.5) * contrast + 0.5, 0.0, 1.0)
+
+    def _apply_vignette(self, img: np.ndarray) -> None:
+        vig = float(self.settings.vignette)
+        img *= ((1.0 - vig) + vig * self.vignette)[:, :, None]
+
+    def _grade_plate(self, plate: np.ndarray, feat: dict, frame_i: int) -> np.ndarray:
+        """Effects that belong to an imported image or video, before the graphics are added."""
+        s = self.settings
+        blur = float(s.bg_blur)
+        if blur > 0.01:
+            plate = cv2.GaussianBlur(plate, (0, 0), sigmaX=0.6 + blur * 18.0)
+        gain = float(s.bg_brightness) * 2.0
+        if abs(gain - 1.0) > 0.01:
+            plate = np.clip(plate * gain, 0.0, 1.0)
+        sat = float(s.bg_saturation)
+        if sat < 0.999:
+            luma = plate @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+            plate = np.clip(luma[:, :, None] * (1.0 - sat) + plate * sat, 0.0, 1.0)
+        self._glitch_inplace(plate, float(s.bg_glitch), feat, frame_i, 3)
+        self._scanlines_inplace(plate, float(s.bg_scanlines))
+        plate = self._chroma_split(plate, float(s.bg_chroma), feat)
+        self._grain_inplace(plate, float(s.bg_grain), frame_i + 17, None)
+        return plate
 
     def _draw_scene(self, layer: np.ndarray, feat: dict, t: float) -> None:
         fg = _col(self.palette["fg"])
@@ -559,17 +746,7 @@ class VisualEngine:
         b = decay * 0.85  # per-frame trail gain
         live_gain = 0.72 + 0.15 * (1.0 - trail_amt)
         field = self._field(feat, t)
-        if self.bg_photo is not None:
-            op = float(np.clip(self.settings.bg_opacity, 0.0, 1.0))
-            tint = _rgb(self.palette["bg"])
-            wash = field - tint
-            base = self.bg_photo * (1.0 - op) + tint * op
-            base = np.clip(base + wash * 0.35 * (1.0 - 0.5 * op), 0.0, 1.0)
-        else:
-            # same steady-state level the old feedback loop settled at, so the
-            # dark plasma look is unchanged
-            base = field * (live_gain / (1.0 - b))
-
+        photo = self.bg.frame(frame_i / float(fps)) if self.bg is not None else None
         layer_bgr = np.zeros((self.h, self.w, 3), dtype=np.uint8)
         self._draw_scene(layer_bgr, feat, t)
         add = layer_bgr[:, :, ::-1].astype(np.float32) / 255.0
@@ -578,78 +755,51 @@ class VisualEngine:
         self.trail *= b
         self.trail += add
         np.clip(self.trail, 0.0, 1.0, out=self.trail)
-        img = np.clip(base + self.trail, 0.0, 1.5)
 
-        # onset flash
+        flash = None
         if feat["onset"] > 0.5:
             flash = _rgb(self.palette["fg"]) * (feat["onset"] - 0.5) * 0.55 * self.settings.intensity
-            img += flash
 
-        # glitch slices
-        gamt = float(self.settings.glitch)
-        if gamt > 0.02 and feat["onset"] * gamt > 0.12:
-            rng = np.random.default_rng(self.settings.seed + frame_i * 13)
-            n_slices = int(1 + gamt * 10 * feat["onset"])
-            for _ in range(n_slices):
-                y = int(rng.integers(0, max(self.h - 8, 1)))
-                hgt = int(rng.integers(2, max(3, int(6 + gamt * 28))))
-                hgt = min(hgt, self.h - y)
-                shift = int(rng.integers(-int(self.w * 0.07 * gamt) - 1, int(self.w * 0.07 * gamt) + 2))
-                img[y : y + hgt] = np.roll(img[y : y + hgt], shift, axis=1)
-                if gamt > 0.4:
-                    ch = int(rng.integers(0, 3))
-                    img[y : y + hgt, :, ch] = np.roll(img[y : y + hgt, :, ch], shift // 2, axis=1)
+        if photo is not None:
+            op = float(np.clip(self.settings.bg_opacity, 0.0, 1.0))
+            tint = _rgb(self.palette["bg"])
+            wash = field - tint
+            base = photo * (1.0 - op) + tint * op
+            base = np.clip(base + wash * 0.35 * (1.0 - 0.5 * op), 0.0, 1.0)
+            base = self._grade_plate(base, feat, frame_i)
+            # Grade the graphics alone so their grain and glitch leave the picture alone.
+            viz = np.clip(self.trail, 0.0, 1.5).copy()
+            if flash is not None:
+                viz += flash
+            ink = np.clip(viz.max(axis=2, keepdims=True) * 3.0, 0.0, 1.0)
+            self._glitch_inplace(viz, float(self.settings.glitch), feat, frame_i, 0)
+            self._snow(viz, feat, frame_i, mask=ink)
+            self._bloom_inplace(viz, float(self.settings.bloom))
+            self._scanlines_inplace(viz, float(self.settings.scanlines))
+            viz = self._chroma_split(viz, float(self.settings.chromatic), feat)
+            self._grain_inplace(viz, float(self.settings.grain), frame_i, ink)
+            img = np.clip(base + viz, 0.0, 1.0)
+            # Leave the imported picture out of the plasma crush. That curve
+            # was tuned for the dark field and clips a photo toward white.
+        else:
+            # same steady-state level the old feedback loop settled at, so the
+            # dark plasma look is unchanged
+            base = field * (live_gain / (1.0 - b))
+            img = np.clip(base + self.trail, 0.0, 1.5)
+            if flash is not None:
+                img += flash
+            self._glitch_inplace(img, float(self.settings.glitch), feat, frame_i, 0)
+            self._snow(img, feat, frame_i)
+            self._bloom_inplace(img, float(self.settings.bloom))
+            img = np.clip(img, 0.0, 1.0)
+            self._apply_vignette(img)
+            self._scanlines_inplace(img, float(self.settings.scanlines))
+            img = self._chroma_split(img, float(self.settings.chromatic), feat)
+            img = self._crush(img)
+            self._grain_inplace(img, float(self.settings.grain), frame_i, None)
 
-        self._snow(img, feat, frame_i)
-
-        # bloom
-        bloom = float(self.settings.bloom)
-        if bloom > 0.02:
-            gray = img.max(axis=2)
-            mask = np.clip((gray - 0.52) * 2.8, 0.0, 1.0)
-            hi = img * mask[:, :, None]
-            sigma = 5.0 + 16.0 * bloom
-            blurred = cv2.GaussianBlur(hi, (0, 0), sigmaX=sigma)
-            img = img + blurred * bloom * 1.35
-
-        img = np.clip(img, 0.0, 1.0)
-
-        # vignette
-        vig = float(self.settings.vignette)
-        img *= ((1.0 - vig) + vig * self.vignette)[:, :, None]
-
-        # scanlines
-        sl = float(self.settings.scanlines)
-        if sl > 0.01:
-            img[::2] *= 1.0 - 0.38 * sl
-            if sl > 0.55:
-                img[1::4] *= 1.0 - 0.12 * sl
-
-        # chromatic aberration
-        ch = float(self.settings.chromatic)
-        if ch > 0.02:
-            shift = max(1, int(1 + ch * 7 + feat["high"] * 2))
-            out = img.copy()
-            out[:, :, 0] = np.roll(img[:, :, 0], -shift, axis=1)
-            out[:, :, 2] = np.roll(img[:, :, 2], shift, axis=1)
-            img = out
-
-        # crush + contrast
-        crush = float(self.look.get("crush", 0.05))
-        contrast = float(self.look.get("contrast", 1.15))
-        img = np.clip((img - crush) / max(1.0 - crush, 0.2), 0.0, 1.0)
-        img = np.clip((img - 0.5) * contrast + 0.5, 0.0, 1.0)
-
-        # grain tile
-        grain_amt = float(self.settings.grain)
-        if grain_amt > 0.01:
-            tile = self.grain_tiles[frame_i % len(self.grain_tiles)]
-            gh, gw = tile.shape
-            yy = (frame_i * 19) % gh
-            xx = (frame_i * 13) % gw
-            tiled = np.tile(tile, (self.h // gh + 3, self.w // gw + 3))
-            g = tiled[yy : yy + self.h, xx : xx + self.w]
-            img = np.clip(img + (g[:, :, None] - 0.5) * grain_amt * 0.55, 0.0, 1.0)
+        if photo is not None:
+            self._apply_vignette(img)
 
         # jitter + bass punch via border crop
         jitter = float(self.settings.jitter)
@@ -676,13 +826,15 @@ class VisualEngine:
 
         img = np.clip(img, 0.0, 1.0)
         if self.logo is not None:
+            text_x, text_top = title_anchor(self.settings, self.w, self.h)
             logo_layer = rasterize_logo(
                 self.w,
                 self.h,
                 self.logo,
                 self.settings.logo_position,
                 float(self.settings.logo_size),
-                float(self.settings.text_y),
+                text_top,
+                text_x,
             )
             if logo_layer is not None:
                 logo_layer = fx_rgba(
@@ -707,3 +859,9 @@ class VisualEngine:
             )
             apply_text(img, text_layer, float(self.settings.text_opacity))
         return (img * 255.0 + 0.5).astype(np.uint8)
+
+    def close(self) -> None:
+        bg = self.bg
+        self.bg = None
+        if bg is not None:
+            bg.close()
