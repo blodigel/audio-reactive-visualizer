@@ -55,6 +55,45 @@ def sample_tex(tex: np.ndarray, h: int, w: int, t: float, scale: float, ox: floa
     return tex[np.ix_(yi, xi)]
 
 
+def zoom_center(img: np.ndarray, zoom: float) -> np.ndarray:
+    """Scale up around the middle of the frame, keeping the size."""
+    if zoom <= 1.001:
+        return img
+    h, w = img.shape[:2]
+    nw = max(8, int(round(w / zoom)))
+    nh = max(8, int(round(h / zoom)))
+    x0 = (w - nw) // 2
+    y0 = (h - nh) // 2
+    return cv2.resize(img[y0 : y0 + nh, x0 : x0 + nw], (w, h), interpolation=cv2.INTER_LINEAR)
+
+
+def plate_amounts(settings: VisualSettings, feat: dict) -> dict[str, float]:
+    """Per-frame levels of the background effects.
+
+    bg_reactivity scales how far each level swings from its slider around the
+    audio: brightness and saturation follow energy, blur clears on bass, grain
+    and chroma follow the highs, glitch follows onsets. At 0 every level is the
+    slider itself, so a static picture renders exactly as before. Mirrored in
+    preview.js (_plateAmounts).
+    """
+    r = float(np.clip(settings.bg_reactivity, 0.0, 1.0))
+    energy = float(np.clip(feat["energy"], 0.0, 1.2))
+    bass = float(np.clip(feat["bass"], 0.0, 1.2))
+    hiss = float(np.clip(feat["high"] + feat["air"], 0.0, 1.2))
+    onset = float(np.clip(feat["onset"], 0.0, 1.4))
+    swell = 1.0 + r * (energy - 0.3)
+    return {
+        "zoom": 1.0 + float(settings.bg_punch) * bass * 0.12,
+        "blur": float(np.clip(settings.bg_blur * (1.0 - r * bass * 0.8), 0.0, 1.0)),
+        "gain": float(settings.bg_brightness) * 2.0 * (1.0 + r * (energy - 0.3) * 0.8),
+        "saturation": float(np.clip(settings.bg_saturation * (1.0 + (swell - 1.0) * 0.6), 0.0, 1.6)),
+        "glitch": float(np.clip(settings.bg_glitch * (1.0 + r * onset * 1.5), 0.0, 1.0)),
+        "scanlines": float(np.clip(settings.bg_scanlines * (1.0 + r * (bass - 0.3) * 0.8), 0.0, 1.0)),
+        "chroma": float(np.clip(settings.bg_chroma * (1.0 + r * (hiss * 1.2 + onset * 0.6)), 0.0, 1.0)),
+        "grain": float(np.clip(settings.bg_grain * (1.0 + r * (hiss - 0.3) * 1.4), 0.0, 1.0)),
+    }
+
+
 def glow_polyline(layer: np.ndarray, pts: np.ndarray, color_bgr: tuple[int, int, int], thickness: int) -> None:
     if pts is None or len(pts) < 2:
         return
@@ -687,21 +726,22 @@ class VisualEngine:
 
     def _grade_plate(self, plate: np.ndarray, feat: dict, frame_i: int) -> np.ndarray:
         """Effects that belong to an imported image or video, before the graphics are added."""
-        s = self.settings
-        blur = float(s.bg_blur)
+        amt = plate_amounts(self.settings, feat)
+        plate = zoom_center(plate, amt["zoom"])
+        blur = amt["blur"]
         if blur > 0.01:
             plate = cv2.GaussianBlur(plate, (0, 0), sigmaX=0.6 + blur * 18.0)
-        gain = float(s.bg_brightness) * 2.0
+        gain = amt["gain"]
         if abs(gain - 1.0) > 0.01:
             plate = np.clip(plate * gain, 0.0, 1.0)
-        sat = float(s.bg_saturation)
-        if sat < 0.999:
+        sat = amt["saturation"]
+        if abs(sat - 1.0) > 0.001:
             luma = plate @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
             plate = np.clip(luma[:, :, None] * (1.0 - sat) + plate * sat, 0.0, 1.0)
-        self._glitch_inplace(plate, float(s.bg_glitch), feat, frame_i, 3)
-        self._scanlines_inplace(plate, float(s.bg_scanlines))
-        plate = self._chroma_split(plate, float(s.bg_chroma), feat)
-        self._grain_inplace(plate, float(s.bg_grain), frame_i + 17, None)
+        self._glitch_inplace(plate, amt["glitch"], feat, frame_i, 3)
+        self._scanlines_inplace(plate, amt["scanlines"])
+        plate = self._chroma_split(plate, amt["chroma"], feat)
+        self._grain_inplace(plate, amt["grain"], frame_i + 17, None)
         return plate
 
     def _draw_scene(self, layer: np.ndarray, feat: dict, t: float) -> None:

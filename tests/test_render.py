@@ -201,3 +201,53 @@ def test_logo_above_text_follows_title_x():
     left = logo_xy(400, 800, 40, 20, "above-text", text_y=0.5, text_x=0.2)
     right = logo_xy(400, 800, 40, 20, "above-text", text_y=0.5, text_x=0.8)
     assert right[0] > left[0] + 100
+
+
+def test_background_reactivity_follows_the_audio(wav_path):
+    from app.viz import plate_amounts
+
+    quiet = {"energy": 0.0, "bass": 0.0, "high": 0.0, "air": 0.0, "onset": 0.0}
+    loud = {"energy": 1.0, "bass": 1.0, "high": 0.6, "air": 0.4, "onset": 1.0}
+    static = VisualSettings(bg_blur=0.5, bg_grain=0.5, bg_chroma=0.3, bg_reactivity=0, bg_punch=0)
+    for feat in (quiet, loud):
+        amt = plate_amounts(static, feat)
+        assert amt["zoom"] == 1.0
+        assert amt["blur"] == 0.5
+        assert amt["gain"] == 1.0
+        assert amt["saturation"] == 1.0
+        assert amt["grain"] == 0.5
+        assert amt["chroma"] == 0.3
+
+    live = VisualSettings(bg_blur=0.5, bg_grain=0.5, bg_chroma=0.3, bg_reactivity=1, bg_punch=1)
+    q = plate_amounts(live, quiet)
+    l = plate_amounts(live, loud)
+    assert l["gain"] > 1.0 > q["gain"]
+    assert l["blur"] < q["blur"]
+    assert l["grain"] > q["grain"]
+    assert l["chroma"] > q["chroma"]
+    assert l["zoom"] > 1.05 and q["zoom"] == 1.0
+
+    plate = np.full((36, 36, 3), 0.45, dtype=np.float32)
+    plate[:, ::2] = 0.15
+
+    def with_features(engine, feat):
+        base = engine.features_at(0.2)
+        base.update(feat)
+        engine.features_at = lambda _t: base
+        return engine
+
+    loud_static = with_features(_flat_engine(wav_path, plate), loud).render_frame(0, 24)
+    quiet_static = with_features(_flat_engine(wav_path, plate), quiet).render_frame(0, 24)
+    # the plasma wash over the picture already breathes a little with energy
+    static_delta = float(loud_static.mean()) - float(quiet_static.mean())
+    assert abs(static_delta) < 8
+
+    loud_live = with_features(_flat_engine(wav_path, plate, bg_reactivity=1), loud).render_frame(0, 24)
+    quiet_live = with_features(_flat_engine(wav_path, plate, bg_reactivity=1), quiet).render_frame(0, 24)
+    live_delta = float(loud_live.mean()) - float(quiet_live.mean())
+    assert live_delta > static_delta + 15
+
+    # punch zooms the stripes: the pattern period grows, so fewer edges per row
+    punched = with_features(_flat_engine(wav_path, plate, bg_punch=1), loud).render_frame(0, 24)
+    edges = lambda fr: int((np.abs(np.diff(fr[18, :, 0].astype(np.int16))) > 20).sum())
+    assert edges(punched) < edges(loud_static)

@@ -1,6 +1,6 @@
-import { api, uploadWav } from "./api.js?v=26";
-import { Preview } from "./preview.js?v=26";
-import { Waveform, formatTime } from "./waveform.js?v=26";
+import { api, uploadWav } from "./api.js?v=27";
+import { Preview } from "./preview.js?v=27";
+import { Waveform, formatTime } from "./waveform.js?v=27";
 
 const $ = (id) => document.getElementById(id);
 
@@ -31,6 +31,8 @@ const state = {
     bg_glitch: 0,
     bg_scanlines: 0,
     bg_chroma: 0,
+    bg_reactivity: 0,
+    bg_punch: 0,
     grain: 0.48,
     jitter: 0.32,
     bloom: 0.22,
@@ -88,6 +90,8 @@ const LOOK_KEYS = [
   "bg_glitch",
   "bg_scanlines",
   "bg_chroma",
+  "bg_reactivity",
+  "bg_punch",
   "font",
   "font_id",
   "grain",
@@ -156,6 +160,8 @@ function ensureBgFx(s) {
   if (s.bg_glitch == null) s.bg_glitch = 0;
   if (s.bg_scanlines == null) s.bg_scanlines = 0;
   if (s.bg_chroma == null) s.bg_chroma = 0;
+  if (s.bg_reactivity == null) s.bg_reactivity = 0;
+  if (s.bg_punch == null) s.bg_punch = 0;
 }
 
 function ensureTextBoxes(s) {
