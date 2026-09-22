@@ -65,7 +65,7 @@ def create_app() -> FastAPI:
         prune_old()
     except Exception:
         log.exception("startup prune failed")
-    app = FastAPI(title="NOISE/VIZ", version="1.1.0")
+    app = FastAPI(title="NOISE/VIZ", version="1.3.0")
 
     @app.get("/api/health")
     def health() -> dict:

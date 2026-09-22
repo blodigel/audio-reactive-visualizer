@@ -79,6 +79,10 @@ class VisualSettings(BaseModel):
     bg_glitch: float = Field(default=0.0, ge=0, le=1)
     bg_scanlines: float = Field(default=0.0, ge=0, le=1)
     bg_chroma: float = Field(default=0.0, ge=0, le=1)
+    # 0 keeps the imported picture static; 1 lets its effects swing with the audio.
+    bg_reactivity: float = Field(default=0.0, ge=0, le=1)
+    # Bass zoom on the picture alone.
+    bg_punch: float = Field(default=0.0, ge=0, le=1)
     grain: float = Field(default=0.45, ge=0, le=1)
     jitter: float = Field(default=0.30, ge=0, le=1)
     bloom: float = Field(default=0.25, ge=0, le=1)

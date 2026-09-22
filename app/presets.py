@@ -201,6 +201,12 @@ def public_catalog() -> dict[str, Any]:
             {"key": "bg_glitch", "label": "Glitch", "blurb": "Slice tears on the picture, on hits."},
             {"key": "bg_scanlines", "label": "Scanlines", "blurb": "CRT lines on the picture."},
             {"key": "bg_chroma", "label": "Chroma", "blurb": "RGB split on the picture."},
+            {
+                "key": "bg_reactivity",
+                "label": "Reactivity",
+                "blurb": "How much the picture follows the audio. Brightness and saturation swell with energy, blur snaps sharp on bass, grain and chroma ride the highs, glitch fires harder on hits. 0 = static.",
+            },
+            {"key": "bg_punch", "label": "Punch", "blurb": "Bass zoom on the picture alone. The audio graphics stay put."},
         ],
         "viz_sliders": [
             {"key": "grain", "label": "Grain", "blurb": "Film grain on the audio graphics. With no background, it covers the whole frame."},

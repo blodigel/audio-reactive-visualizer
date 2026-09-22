@@ -869,19 +869,48 @@ export class Preview {
     return (n) => Math.max(0.75, n * k);
   }
 
+  // plate_amounts in viz.py: bg_reactivity swings each background effect
+  // around its slider with the audio; at 0 the levels are the sliders.
+  _plateAmounts(s, f) {
+    const r = clamp(s.bg_reactivity ?? 0, 0, 1);
+    const energy = clamp(f.energy, 0, 1.2);
+    const bass = clamp(f.bass, 0, 1.2);
+    const hiss = clamp(f.high + f.air, 0, 1.2);
+    const onset = clamp(f.onset, 0, 1.4);
+    const swell = 1 + r * (energy - 0.3);
+    return {
+      zoom: 1 + (s.bg_punch ?? 0) * bass * 0.12,
+      blur: clamp((s.bg_blur ?? 0) * (1 - r * bass * 0.8), 0, 1),
+      gain: (s.bg_brightness ?? 0.5) * 2 * (1 + r * (energy - 0.3) * 0.8),
+      saturation: clamp((s.bg_saturation ?? 1) * (1 + (swell - 1) * 0.6), 0, 1.6),
+      glitch: clamp((s.bg_glitch ?? 0) * (1 + r * onset * 1.5), 0, 1),
+      scanlines: clamp((s.bg_scanlines ?? 0) * (1 + r * (bass - 0.3) * 0.8), 0, 1),
+      chroma: clamp((s.bg_chroma ?? 0) * (1 + r * (hiss * 1.2 + onset * 0.6)), 0, 1),
+      grain: clamp((s.bg_grain ?? 0) * (1 + r * (hiss - 0.3) * 1.4), 0, 1),
+    };
+  }
+
   _gradePlate(ctx, w, h, f, pal, s, k) {
-    const blur = s.bg_blur ?? 0;
-    const bright = s.bg_brightness ?? 0.5;
-    const sat = s.bg_saturation ?? 1;
+    const amt = this._plateAmounts(s, f);
+    if (amt.zoom > 1.001) {
+      // zoom_center: scale the picture up around the middle, same frame size
+      const sc = this.sctx;
+      sc.globalCompositeOperation = "copy";
+      sc.drawImage(this.canvas, 0, 0);
+      sc.globalCompositeOperation = "source-over";
+      const nw = w * amt.zoom;
+      const nh = h * amt.zoom;
+      ctx.drawImage(this.scratch, (w - nw) / 2, (h - nh) / 2, nw, nh);
+    }
     const parts = [];
-    if (blur > 0.01) parts.push(`blur(${((0.4 + blur * 8) * k).toFixed(2)}px)`);
-    if (Math.abs(bright - 0.5) > 0.01) parts.push(`brightness(${(bright * 2).toFixed(3)})`);
-    if (sat < 0.999) parts.push(`saturate(${Number(sat).toFixed(3)})`);
+    if (amt.blur > 0.01) parts.push(`blur(${((0.4 + amt.blur * 8) * k).toFixed(2)}px)`);
+    if (Math.abs(amt.gain - 1) > 0.01) parts.push(`brightness(${amt.gain.toFixed(3)})`);
+    if (Math.abs(amt.saturation - 1) > 0.001) parts.push(`saturate(${amt.saturation.toFixed(3)})`);
     if (parts.length) this._selfFilter(ctx, w, h, parts.join(" "));
-    this._glitchSlices(ctx, w, h, s.bg_glitch ?? 0, f.onset, k);
-    this._scanlines(ctx, w, h, s.bg_scanlines ?? 0, k, false);
-    this._chroma(ctx, w, h, s.bg_chroma ?? 0, f.high, k);
-    this._grainOverlay(ctx, w, h, s.bg_grain ?? 0, false);
+    this._glitchSlices(ctx, w, h, amt.glitch, f.onset, k);
+    this._scanlines(ctx, w, h, amt.scanlines, k, false);
+    this._chroma(ctx, w, h, amt.chroma, f.high, k);
+    this._grainOverlay(ctx, w, h, amt.grain, false);
   }
 
   _paintVizLayer(ctx, w, h, f, pal, s, k) {
